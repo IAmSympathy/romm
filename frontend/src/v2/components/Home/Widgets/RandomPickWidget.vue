@@ -2,7 +2,10 @@
 // RandomPickWidget — picks a random ROM from the library and surfaces
 // it on the Home dashboard. Body: cover + name + platform + release
 // year / region, the whole thing a link to the rom. Reroll lives in
-// the card's top-right action slot and reshuffles in place instantly.
+// the card's top-right action slot and reshuffles in place without
+// navigating. Two API calls per pick: one to learn the library total,
+// one to fetch the selected offset; same approach the v1 RandomBtn
+// uses. The pick is intentionally not cached so each mount re-shuffles.
 import { RBtn, RChip } from "@v2/lib";
 import { computed, nextTick, onMounted, ref } from "vue";
 import type { ComponentPublicInstance } from "vue";
@@ -20,6 +23,9 @@ defineOptions({ inheritAttrs: false });
 const { t } = useI18n();
 const snackbar = useSnackbar();
 
+// The reroll button shows a real die face rather than the stacked
+// `dice-multiple` glyph, which reads as two windows at this size. Each
+// roll lands on a different face.
 const DICE_FACES = [
   "mdi-dice-1-outline",
   "mdi-dice-2-outline",
@@ -29,17 +35,23 @@ const DICE_FACES = [
   "mdi-dice-6-outline",
 ];
 
+// A pick needs a single row, so it opts out of the char index, filter
+// values and rom id index the endpoint returns by default: each of them
+// spans the whole library and dwarfs the row itself.
+const PICK_QUERY = {
+  limit: 1,
+  withCharIndex: false,
+  withFilterValues: false,
+  withRomIdIndex: false,
+} as const;
+
 const pick = ref<SimpleRom | null>(null);
+const loading = ref(false);
 const failed = ref(false);
 const isSpinning = ref(false);
 const isBouncing = ref(false);
 const diceFace = ref(DICE_FACES[Math.floor(Math.random() * DICE_FACES.length)]);
 const rerollBtn = ref<ComponentPublicInstance | null>(null);
-const isInitialLoading = ref(true);
-
-const preloadedQueue: SimpleRom[] = [];
-let availableIds: number[] = [];
-let isPrefetching = false;
 
 function rerollEl(): HTMLElement | null {
   return (rerollBtn.value?.$el as HTMLElement | undefined) ?? null;
@@ -67,113 +79,94 @@ function rollDiceFace() {
   diceFace.value = others[Math.floor(Math.random() * others.length)];
 }
 
-async function loadOneRom(): Promise<SimpleRom | null> {
-  try {
-    if (availableIds.length === 0) {
-      const { data: res } = await romApi.getRoms({
-        limit: 1,
+let globalLibraryTotal: number | null = null;
+const totalRoms = ref<number | null>(globalLibraryTotal);
+
+// One attempt at a pick. `null` means the library holds no roms;
+// `undefined` means the offset came back empty, which the backend's
+// cached id index makes possible when it drifts from the database
+// between the two calls (a scan, a deletion).
+async function pickOnce(): Promise<SimpleRom | null | undefined> {
+  if (totalRoms.value === null) {
+    if (globalLibraryTotal !== null) {
+      totalRoms.value = globalLibraryTotal;
+    } else {
+      const { data: head } = await romApi.getRoms({
+        ...PICK_QUERY,
         offset: 0,
-        withRomIdIndex: true,
-        withCharIndex: false,
-        withFilterValues: false,
+        withTotal: true,
       });
-      availableIds = res.rom_id_index || [];
-      if (availableIds.length === 0 && res.items?.length > 0) {
-        return res.items[0];
-      }
+      if (!head.total) return null;
+      totalRoms.value = head.total;
+      globalLibraryTotal = head.total;
     }
-    if (availableIds.length === 0) return null;
-
-    const randomOffset = Math.floor(Math.random() * availableIds.length);
-    const { data: result } = await romApi.getRoms({
-      limit: 1,
-      offset: randomOffset,
-      withTotal: false,
-      withCharIndex: false,
-      withFilterValues: false,
-      withRomIdIndex: false,
-    });
-    const rom = result.items.at(0) || null;
-    if (rom) {
-      const coverUrl = rom.cover_url || (rom as any)?.metadatum?.cover_url;
-      if (coverUrl) {
-        const img = new Image();
-        img.src = coverUrl;
-      }
-    }
-    return rom;
-  } catch {
-    return null;
   }
+
+  const { data: result } = await romApi.getRoms({
+    ...PICK_QUERY,
+    withTotal: false,
+    offset: Math.floor(Math.random() * totalRoms.value),
+  });
+  const rom = result.items.at(0);
+  if (rom) {
+    const coverUrl = rom.cover_url || (rom as any)?.metadatum?.cover_url;
+    if (coverUrl) {
+      // Non-blocking image preload (fire and forget) so rerolls remain instant
+      const img = new Image();
+      img.src = coverUrl;
+    }
+  }
+  return rom;
 }
 
-async function fillQueue() {
-  if (isPrefetching) return;
-  isPrefetching = true;
-  try {
-    while (preloadedQueue.length < 5) {
-      const rom = await loadOneRom();
-      if (rom) {
-        preloadedQueue.push(rom);
-      } else {
-        break;
-      }
-    }
-  } finally {
-    isPrefetching = false;
-  }
-}
+const isInitialLoading = ref(true);
 
-async function onReroll() {
+async function reroll({ notify }: { notify: boolean }) {
   rollDiceFace();
   const hadFocus = document.activeElement === rerollEl();
-
+  
   isSpinning.value = true;
   setTimeout(() => {
     isSpinning.value = false;
   }, 400);
 
-  let nextRom: SimpleRom | null = null;
-  if (preloadedQueue.length > 0) {
-    nextRom = preloadedQueue.shift()!;
-  } else {
-    nextRom = await loadOneRom();
-  }
-
-  if (nextRom) {
-    pick.value = nextRom;
+  try {
+    let rom = await pickOnce();
+    if (rom === undefined) {
+      totalRoms.value = null;
+      globalLibraryTotal = null;
+      rom = await pickOnce();
+    }
+    if (rom === undefined) throw new Error("random pick came back empty");
+    pick.value = rom;
     failed.value = false;
+
     isBouncing.value = false;
     await nextTick();
     isBouncing.value = true;
     setTimeout(() => {
       isBouncing.value = false;
     }, 500);
-  } else if (!pick.value) {
+
+  } catch {
     failed.value = true;
+    if (notify) snackbar.error(t("home.widget-random-pick-error"));
+  } finally {
+    loading.value = false;
+    isInitialLoading.value = false;
+    if (hadFocus) {
+      await nextTick();
+      rerollEl()?.focus();
+    }
   }
-
-  if (hadFocus) {
-    await nextTick();
-    rerollEl()?.focus();
-  }
-
-  // Refill queue asynchronously in background (never blocking the UI)
-  void fillQueue();
 }
 
-onMounted(async () => {
-  isInitialLoading.value = true;
-  const initialRom = await loadOneRom();
-  if (initialRom) {
-    pick.value = initialRom;
-    failed.value = false;
-  } else {
-    failed.value = true;
-  }
-  isInitialLoading.value = false;
-  void fillQueue();
-});
+function onReroll() {
+  void reroll({ notify: true });
+}
+
+// The first pick is ours, not the user's
+onMounted(() => reroll({ notify: false }));
 </script>
 
 <template>
@@ -184,6 +177,7 @@ onMounted(async () => {
         variant="text"
         size="small"
         :icon="diceFace"
+        :disabled="loading"
         class="r-v2-widget-pick__reroll"
         :class="{ 'is-spinning': isSpinning }"
         :tooltip="t('home.widget-random-pick-reroll')"
@@ -204,33 +198,28 @@ onMounted(async () => {
         class="r-v2-widget-pick__cover"
       />
       <div class="r-v2-widget-pick__info">
-        <div class="r-v2-widget-pick__name">
-          {{ title }}
-        </div>
-
+        <div class="r-v2-widget-pick__name">{{ title }}</div>
         <div class="r-v2-widget-pick__platform">
           <CachedPlatformIcon
-            v-if="pick.platform"
-            :platform="pick.platform"
+            :slug="pick.platform_slug"
+            :name="pick.platform_display_name"
             :size="14"
-            class="r-v2-widget-pick__platform-icon"
           />
           <span class="r-v2-widget-pick__platform-name">
-            {{ pick.platform?.fs_name || pick.platform?.name }}
+            {{ pick.platform_display_name }}
           </span>
         </div>
-
-        <div v-if="releaseYear || region" class="r-v2-widget-pick__chips">
-          <RChip v-if="releaseYear" size="x-small" variant="subtle">
-            {{ releaseYear }}
-          </RChip>
-          <RChip v-if="region" size="x-small" variant="subtle">
+        <!-- Year + region disambiguate the pick when a library holds
+             several variations of the same title. -->
+        <div v-if="releaseYear || region" class="r-v2-widget-pick__meta">
+          <span v-if="releaseYear">{{ releaseYear }}</span>
+          <RChip v-if="region" size="x-small" variant="translucent">
             {{ region }}
           </RChip>
         </div>
       </div>
     </router-link>
-    <div v-else class="r-v2-widget-pick__placeholder">
+    <div v-else class="r-v2-widget-pick__empty">
       {{ placeholder }}
     </div>
   </WidgetCard>
@@ -239,92 +228,110 @@ onMounted(async () => {
 <style scoped>
 .r-v2-widget-pick__body {
   display: flex;
-  gap: 12px;
+  flex-direction: column;
+  gap: 6px;
   align-items: center;
-  text-decoration: none;
-  color: inherit;
+  justify-content: space-between;
   width: 100%;
-  transition: transform var(--r-motion-fast) var(--r-motion-ease-out);
-}
-
-.r-v2-widget-pick__body:hover {
-  transform: translateY(-1px);
-}
-
-.r-v2-widget-pick__cover {
-  width: 58px;
-  height: 78px;
-  flex-shrink: 0;
+  height: 100%;
+  margin-top: 6px;
+  overflow: visible;
+  color: inherit;
+  text-decoration: none;
   border-radius: var(--r-radius-sm);
-  overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.r-v2-widget-pick__body .r-v2-widget-pick__cover {
+  height: auto;
+  max-height: 162px;
+  min-height: 135px;
+  width: auto;
+  max-width: 100%;
+  flex: 1 1 auto;
+  object-fit: contain;
+  --r-cover-radius: var(--r-radius-sm);
 }
 
 .r-v2-widget-pick__info {
+  width: 100%;
+  align-items: center;
+  text-align: center;
+  gap: 4px;
+  flex-shrink: 0;
+  overflow: visible;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  flex: 1;
 }
 
 .r-v2-widget-pick__name {
-  font-size: 13.5px;
-  font-weight: var(--r-font-weight-semibold);
-  color: var(--r-color-fg);
-  line-height: 1.3;
-
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: center;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
+  color: var(--r-color-fg);
+  transition: color var(--r-motion-fast) var(--r-motion-ease-out);
+}
+
+/* Hover is gated to pointer modalities so a parked cursor doesn't
+   compete with the focused element under keyboard / gamepad. */
+html[data-input="mouse"] .r-v2-widget-pick__body:hover .r-v2-widget-pick__name,
+html[data-input="touch"] .r-v2-widget-pick__body:hover .r-v2-widget-pick__name,
+.r-v2-widget-pick__body:focus-visible .r-v2-widget-pick__name {
+  color: var(--r-color-brand-primary);
 }
 
 .r-v2-widget-pick__platform {
   display: flex;
   align-items: center;
   gap: 5px;
-  color: var(--r-color-fg-secondary);
-  font-size: 11.5px;
-}
-
-.r-v2-widget-pick__platform-icon {
-  flex-shrink: 0;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--r-color-fg-muted);
 }
 
 .r-v2-widget-pick__platform-name {
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.r-v2-widget-pick__chips {
+.r-v2-widget-pick__meta {
   display: flex;
-  gap: 4px;
   align-items: center;
-  margin-top: 2px;
+  gap: 6px;
+  margin-top: auto;
+  font-size: 11px;
+  color: var(--r-color-fg-muted);
+  font-variant-numeric: tabular-nums;
 }
 
-.r-v2-widget-pick__placeholder {
+/* The die reads as a die only above the button's default 1.25em glyph. */
+.r-v2-widget-pick__reroll :deep(.r-btn__icon) {
+  font-size: 19px;
+}
+
+.r-v2-widget-pick__empty {
   font-size: 12px;
   color: var(--r-color-fg-faint);
-  text-align: center;
-  padding: 12px 0;
+  margin-top: auto;
 }
 
-.r-v2-widget-pick__reroll {
-  color: var(--r-color-fg-secondary);
-
-  &:hover {
-    color: var(--r-color-fg);
-  }
-
-  &.is-spinning {
-    animation: r-v2-dice-spin 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  }
+/* ── Elastic Spring Bounce & Dice Roll Animations ────────────────── */
+.r-v2-widget-pick__reroll.is-spinning :deep(.r-btn__icon) {
+  animation: dice-spin 0.65s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-@keyframes r-v2-dice-spin {
+.r-v2-widget-pick__body.is-bouncing {
+  animation: spring-bounce 0.65s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes dice-spin {
   0% {
     transform: rotate(0deg) scale(1);
   }
@@ -336,22 +343,21 @@ onMounted(async () => {
   }
 }
 
-.r-v2-widget-pick__body.is-bouncing {
-  animation: r-v2-pick-bounce 0.45s ease-out;
-}
-
-@keyframes r-v2-pick-bounce {
+@keyframes spring-bounce {
   0% {
-    transform: scale(0.97);
-    opacity: 0.85;
+    transform: scale(1);
   }
-  50% {
-    transform: scale(1.02);
-    opacity: 1;
+  30% {
+    transform: scale(0.94) translateY(2px);
+  }
+  60% {
+    transform: scale(1.04) translateY(-3px);
+  }
+  80% {
+    transform: scale(0.99) translateY(1px);
   }
   100% {
-    transform: scale(1);
-    opacity: 1;
+    transform: scale(1) translateY(0);
   }
 }
 </style>
