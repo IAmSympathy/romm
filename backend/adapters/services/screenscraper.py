@@ -527,9 +527,9 @@ class ScreenScraperService:
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                         detail="ScreenScraper API is currently offline.",
                     ) from err
-
-            log.error(err)
-            return {}
+                else:
+                    log.error(err)
+                    return {}
         except json.JSONDecodeError as exc:
             log.error("Error decoding JSON response from ScreenScraper: %s", exc)
             return {}
