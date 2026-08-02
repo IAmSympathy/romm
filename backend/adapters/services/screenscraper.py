@@ -464,19 +464,33 @@ class ScreenScraperService:
             aiohttp_session = create_aiohttp_session()
             owns_session = True
 
+        version = get_version()
+        if version == "development":
+            version = "3.7.3"
+
+        request_url = yarl.URL(url).update_query(
+            {
+                "devid": SCREENSCRAPER_DEV_ID or DEFAULT_SS_DEV_ID,
+                "devpassword": SCREENSCRAPER_DEV_PASSWORD or DEFAULT_SS_DEV_PASSWORD,
+                "output": "json",
+                "softname": "romm",
+                "ssid": SCREENSCRAPER_USER or "",
+                "sspassword": SCREENSCRAPER_PASSWORD or "",
+            }
+        )
+
         try:
             log.debug(
                 "API request: URL=%s, Timeout=%s",
-                url,
+                request_url,
                 request_timeout,
             )
             try:
                 async with _concurrency_limiter:
                     await _rate_limiter.acquire()
                     res = await aiohttp_session.get(
-                        url,
-                        headers={"user-agent": f"RomM/{get_version()}"},
-                        middlewares=(auth_middleware,),
+                        str(request_url),
+                        headers={"user-agent": f"RomM/{version}"},
                         timeout=ClientTimeout(total=request_timeout),
                     )
                     res.raise_for_status()
