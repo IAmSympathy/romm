@@ -16,7 +16,7 @@ const sessionsCount = computed(() => activeSessions.value.length);
 </script>
 
 <template>
-  <WidgetCard title="SESSIONS DE JEU" width="380px">
+  <WidgetCard title="SESSIONS DE JEU" width="490px">
     <template #action>
       <span class="r-v2-widget-active__count">
         {{ sessionsCount }} EN LIGNE

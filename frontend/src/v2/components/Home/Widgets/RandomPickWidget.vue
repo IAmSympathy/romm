@@ -223,46 +223,53 @@ onMounted(() => reroll({ notify: false }));
 <style scoped>
 .r-v2-widget-pick__body {
   display: flex;
-  gap: 10px;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 100%;
+  margin-top: 6px;
+  overflow: visible;
   color: inherit;
   text-decoration: none;
   border-radius: var(--r-radius-sm);
 }
 
-/* Fixed height, natural width — the cover renders at its image's true
-   aspect (GameCover measures it), matching the gallery. The descendant
-   selector outweighs GameCover's base `width: 100%` so width can follow
-   the ratio. */
 .r-v2-widget-pick__body .r-v2-widget-pick__cover {
-  height: 70px;
+  height: auto;
+  max-height: 162px;
+  min-height: 135px;
   width: auto;
-  flex-shrink: 0;
+  max-width: 100%;
+  flex: 1 1 auto;
+  object-fit: contain;
   --r-cover-radius: var(--r-radius-sm);
 }
 
 .r-v2-widget-pick__info {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
+  width: 100%;
+  align-items: center;
+  text-align: center;
+  gap: 4px;
+  flex-shrink: 0;
+  overflow: visible;
   display: flex;
   flex-direction: column;
-  gap: 4px;
 }
 
 .r-v2-widget-pick__name {
-  font-size: 12.5px;
-  font-weight: var(--r-font-weight-semibold);
-  line-height: 1.2;
-  color: var(--r-color-fg);
-  /* Clamp at 2 lines — random covers + 70px height keep the card from
-     growing when the picked title is long. */
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: center;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
+  color: var(--r-color-fg);
   transition: color var(--r-motion-fast) var(--r-motion-ease-out);
 }
 
