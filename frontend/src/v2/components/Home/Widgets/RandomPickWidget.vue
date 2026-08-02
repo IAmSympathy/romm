@@ -120,6 +120,27 @@ async function pickOnce(): Promise<SimpleRom | null | undefined> {
 }
 
 const isInitialLoading = ref(true);
+const prefetchQueue: SimpleRom[] = [];
+let isRefilling = false;
+
+async function refillQueue() {
+  if (isRefilling || prefetchQueue.length >= 3) return;
+  isRefilling = true;
+  try {
+    while (prefetchQueue.length < 3) {
+      const rom = await pickOnce();
+      if (rom) {
+        prefetchQueue.push(rom);
+      } else {
+        break;
+      }
+    }
+  } catch {
+    // Ignore background prefetch failures
+  } finally {
+    isRefilling = false;
+  }
+}
 
 async function reroll({ notify }: { notify: boolean }) {
   rollDiceFace();
@@ -131,13 +152,19 @@ async function reroll({ notify }: { notify: boolean }) {
   }, 400);
 
   try {
-    let rom = await pickOnce();
+    let rom: SimpleRom | null | undefined = null;
+    if (prefetchQueue.length > 0) {
+      rom = prefetchQueue.shift();
+    } else {
+      rom = await pickOnce();
+    }
+
     if (rom === undefined) {
       totalRoms.value = null;
       globalLibraryTotal = null;
       rom = await pickOnce();
     }
-    if (rom === undefined) throw new Error("random pick came back empty");
+    if (!rom) throw new Error("random pick came back empty");
     pick.value = rom;
     failed.value = false;
 
@@ -158,6 +185,8 @@ async function reroll({ notify }: { notify: boolean }) {
       await nextTick();
       rerollEl()?.focus();
     }
+    // Refill prefetch queue asynchronously in background for instant subsequent rolls
+    void refillQueue();
   }
 }
 
