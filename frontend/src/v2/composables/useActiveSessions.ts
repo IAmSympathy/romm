@@ -1,7 +1,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import activityApi, { type ActivityEntry } from "@/services/api/activity";
 import userApi from "@/services/api/user";
-import { router } from "@/plugins/router";
+import router from "@/plugins/router";
 
 const activeSessions = ref<ActivityEntry[]>([]);
 const knownSessionKeys = new Set<string>();
