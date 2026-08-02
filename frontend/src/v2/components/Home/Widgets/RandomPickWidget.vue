@@ -48,6 +48,8 @@ const PICK_QUERY = {
 const pick = ref<SimpleRom | null>(null);
 const loading = ref(false);
 const failed = ref(false);
+const isSpinning = ref(false);
+const isBouncing = ref(false);
 const diceFace = ref(DICE_FACES[Math.floor(Math.random() * DICE_FACES.length)]);
 const rerollBtn = ref<ComponentPublicInstance | null>(null);
 
@@ -139,7 +141,21 @@ async function reroll({ notify }: { notify: boolean }) {
   }
 }
 
+function triggerAnimations() {
+  isSpinning.value = false;
+  isBouncing.value = false;
+  void nextTick(() => {
+    isSpinning.value = true;
+    isBouncing.value = true;
+    setTimeout(() => {
+      isSpinning.value = false;
+      isBouncing.value = false;
+    }, 650);
+  });
+}
+
 function onReroll() {
+  triggerAnimations();
   void reroll({ notify: true });
 }
 
@@ -158,6 +174,7 @@ onMounted(() => reroll({ notify: false }));
         :icon="diceFace"
         :disabled="loading"
         class="r-v2-widget-pick__reroll"
+        :class="{ 'is-spinning': isSpinning }"
         :tooltip="t('home.widget-random-pick-reroll')"
         :aria-label="t('home.widget-random-pick-reroll')"
         @click="onReroll"
@@ -166,6 +183,7 @@ onMounted(() => reroll({ notify: false }));
     <router-link
       v-if="pick"
       class="r-v2-widget-pick__body"
+      :class="{ 'is-bouncing': isBouncing }"
       :to="{ name: ROUTES.ROM, params: { rom: pick.id } }"
     >
       <GameCover
@@ -290,5 +308,44 @@ html[data-input="touch"] .r-v2-widget-pick__body:hover .r-v2-widget-pick__name,
   font-size: 12px;
   color: var(--r-color-fg-faint);
   margin-top: auto;
+}
+
+/* ── Elastic Spring Bounce & Dice Roll Animations ────────────────── */
+.r-v2-widget-pick__reroll.is-spinning :deep(.r-btn__icon) {
+  animation: dice-spin 0.65s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.r-v2-widget-pick__body.is-bouncing {
+  animation: spring-bounce 0.65s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes dice-spin {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.25);
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+@keyframes spring-bounce {
+  0% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(0.94) translateY(2px);
+  }
+  60% {
+    transform: scale(1.04) translateY(-3px);
+  }
+  80% {
+    transform: scale(0.99) translateY(1px);
+  }
+  100% {
+    transform: scale(1) translateY(0);
+  }
 }
 </style>

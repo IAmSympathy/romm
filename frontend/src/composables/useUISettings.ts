@@ -43,6 +43,7 @@ export const UI_SETTINGS_KEYS = {
   // screenshots/disk) view of the Library Snapshot widget.
   showHomeWidgets: { key: "settings.showHomeWidgets", default: true },
   widgetRandomPick: { key: "settings.widgetRandomPick", default: true },
+  widgetActiveSessions: { key: "settings.widgetActiveSessions", default: true },
   widgetLibraryStats: {
     key: "settings.widgetLibraryStats",
     default: true,
@@ -58,7 +59,7 @@ export const UI_SETTINGS_KEYS = {
   // the registry doesn't leave dangling entries in user storage.
   widgetOrder: {
     key: "settings.widgetOrder",
-    default: "randomPick,libraryStats",
+    default: "randomPick,activeSessions,libraryStats",
   },
 
   // Platforms drawer

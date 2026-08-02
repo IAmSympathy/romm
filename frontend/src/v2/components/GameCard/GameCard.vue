@@ -55,6 +55,7 @@ import {
   useGameActions,
 } from "@/v2/composables/useGameActions";
 import { useViewTransition } from "@/v2/composables/useViewTransition";
+import { useActiveSessions } from "@/v2/composables/useActiveSessions";
 import RCheckbox from "@/v2/lib/forms/RCheckbox/RCheckbox.vue";
 import RPlatformIcon from "@/v2/lib/media/RPlatformIcon/RPlatformIcon.vue";
 import RBtn from "@/v2/lib/primitives/RBtn/RBtn.vue";
@@ -272,6 +273,9 @@ const emit = defineEmits<{
 // the gallery's selection bar.
 const selectionStore = storeGallerySelection();
 const selectionInput = useGallerySelectionInput();
+const { isPlaying } = useActiveSessions();
+
+const isLiveActive = computed(() => isPlaying(props.rom.id));
 
 const isSelected = computed(() =>
   props.selectable ? selectionStore.isSelected(props.rom.id) : props.selected,
@@ -473,6 +477,12 @@ function onStaticKeydown(e: KeyboardEvent) {
            screenshot covers the rom's own art. Fades out on hover (below) so
            it never collides with the action overlay. -->
       <CoverArtPip v-if="showCoverPip" :rom="rom" :title="title" :webp="webp" />
+
+      <!-- Live Game Session Badge -->
+      <div v-if="isLiveActive" class="r-gc__live-badge" title="En cours de jeu">
+        <span class="r-gc__live-dot" />
+        <span class="r-gc__live-text">EN DIRECT</span>
+      </div>
 
       <!-- Gallery chrome — all suppressed in static / decorative mode. -->
       <template v-if="!static && !decorative">
@@ -1033,5 +1043,51 @@ html[data-bp~="xs"] .r-gc__label {
 /* Actions always visible on touch (no hover) */
 html[data-bp~="xs"] .r-gc__overlay-bottom {
   opacity: 1;
+}
+
+/* ── Live Game Session Badge ───────────────────────────────────── */
+.r-gc__live-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(18, 18, 18, 0.85);
+  backdrop-filter: blur(6px);
+  padding: 3px 8px;
+  border-radius: var(--r-radius-full, 9999px);
+  border: 1px solid rgba(16, 185, 129, 0.5);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+.r-gc__live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #10b981;
+  box-shadow: 0 0 8px #10b981;
+  animation: pulse-green-badge 1.8s infinite;
+}
+.r-gc__live-text {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #10b981;
+  letter-spacing: 0.5px;
+}
+@keyframes pulse-green-badge {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  }
+  70% {
+    transform: scale(1.1);
+    box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
 }
 </style>
