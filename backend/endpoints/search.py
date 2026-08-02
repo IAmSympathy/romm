@@ -104,13 +104,27 @@ async def search_rom(
     flashpoint_matched_roms: list[FlashpointRom] = []
     launchbox_matched_roms: list[LaunchboxRom] = []
 
+    async def safe_search_name(coro):
+        try:
+            return await coro
+        except Exception as exc:
+            log.warning(f"Metadata search failed for provider: {exc}")
+            return []
+
+    async def safe_search_id(coro):
+        try:
+            return await coro
+        except Exception as exc:
+            log.warning(f"Metadata search by ID failed for provider: {exc}")
+            return None
+
     if search_by.lower() == "id":
         try:
             igdb_rom, moby_rom, ss_rom, lb_rom = await asyncio.gather(
-                meta_igdb_handler.get_matched_rom_by_id(rom, int(search_term)),
-                meta_moby_handler.get_matched_rom_by_id(int(search_term)),
-                meta_ss_handler.get_matched_rom_by_id(rom, int(search_term)),
-                meta_launchbox_handler.get_matched_rom_by_id(int(search_term)),
+                safe_search_id(meta_igdb_handler.get_matched_rom_by_id(rom, int(search_term))),
+                safe_search_id(meta_moby_handler.get_matched_rom_by_id(int(search_term))),
+                safe_search_id(meta_ss_handler.get_matched_rom_by_id(rom, int(search_term))),
+                safe_search_id(meta_launchbox_handler.get_matched_rom_by_id(int(search_term))),
             )
         except ValueError as exc:
             log.error(f"Search error: invalid ID '{search_term}'")
@@ -131,20 +145,30 @@ async def search_rom(
             flashpoint_matched_roms,
             launchbox_matched_roms,
         ) = await asyncio.gather(
-            meta_igdb_handler.get_matched_roms_by_name(
-                rom, search_term, get_main_platform_igdb_id(rom.platform)
+            safe_search_name(
+                meta_igdb_handler.get_matched_roms_by_name(
+                    rom, search_term, get_main_platform_igdb_id(rom.platform)
+                )
             ),
-            meta_moby_handler.get_matched_roms_by_name(
-                search_term, rom.platform.moby_id
+            safe_search_name(
+                meta_moby_handler.get_matched_roms_by_name(
+                    search_term, rom.platform.moby_id
+                )
             ),
-            meta_ss_handler.get_matched_roms_by_name(
-                rom, search_term, rom.platform.ss_id
+            safe_search_name(
+                meta_ss_handler.get_matched_roms_by_name(
+                    rom, search_term, rom.platform.ss_id
+                )
             ),
-            meta_flashpoint_handler.get_matched_roms_by_name(
-                search_term, rom.platform.slug
+            safe_search_name(
+                meta_flashpoint_handler.get_matched_roms_by_name(
+                    search_term, rom.platform.slug
+                )
             ),
-            meta_launchbox_handler.get_matched_roms_by_name(
-                search_term, rom.platform.slug
+            safe_search_name(
+                meta_launchbox_handler.get_matched_roms_by_name(
+                    search_term, rom.platform.slug
+                )
             ),
         )
 
