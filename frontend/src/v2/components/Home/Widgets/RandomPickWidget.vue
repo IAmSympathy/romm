@@ -100,12 +100,9 @@ async function pickOnce(): Promise<SimpleRom | null | undefined> {
   if (rom) {
     const coverUrl = rom.cover_url || (rom as any)?.metadatum?.cover_url;
     if (coverUrl) {
-      await new Promise<void>((resolve) => {
-        const img = new Image();
-        img.onload = () => resolve();
-        img.onerror = () => resolve();
-        img.src = coverUrl;
-      });
+      // Non-blocking image preload (fire and forget) so rerolls remain instant
+      const img = new Image();
+      img.src = coverUrl;
     }
   }
   return rom;

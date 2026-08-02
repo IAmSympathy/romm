@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// LibraryStatsWidget — 2-column grid layout matching the patch spec (295px width).
+// LibraryStatsWidget — 2-column layout (Col 1: Labels, Col 2: Values)
+// matching exact patch specification (295px width).
 import { RIcon } from "@v2/lib";
 import { storeToRefs } from "pinia";
 import { computed, onMounted, ref } from "vue";
@@ -97,57 +98,53 @@ onMounted(async () => {
     :loading="loading"
     width="295px"
   >
-    <div class="r-v2-widget-lib__stats">
-      <div v-for="row in allRows" :key="row.label" class="r-v2-widget-lib__row">
-        <span class="r-v2-widget-lib__label">
+    <div class="r-v2-widget-lib__table">
+      <template v-for="row in allRows" :key="row.label">
+        <div class="r-v2-widget-lib__cell-label">
           <RIcon :icon="row.icon" size="14" class="r-v2-widget-lib__icon" />
-          {{ row.label }}
-        </span>
-        <span class="r-v2-widget-lib__val">{{ row.value }}</span>
-      </div>
+          <span>{{ row.label }}</span>
+        </div>
+        <div class="r-v2-widget-lib__cell-val">
+          {{ row.value }}
+        </div>
+      </template>
     </div>
   </WidgetCard>
 </template>
 
 <style scoped>
-.r-v2-widget-lib__stats {
+.r-v2-widget-lib__table {
   display: grid;
-  grid-template-columns: repeat(2, minmax(110px, 1fr));
-  gap: 6px 10px;
+  grid-template-columns: 1fr auto;
+  gap: 5px 12px;
   width: 100%;
-  padding: 4px 0;
+  padding: 2px 0;
+  align-items: center;
   flex: 1;
 }
 
-.r-v2-widget-lib__row {
+.r-v2-widget-lib__cell-label {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 6px;
-  padding: 4px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   font-size: 11.5px;
-}
-
-.r-v2-widget-lib__label {
   color: #cbd5e1;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
   white-space: nowrap;
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .r-v2-widget-lib__icon {
   color: #a78bfa !important;
 }
 
-.r-v2-widget-lib__val {
+.r-v2-widget-lib__cell-val {
   font-size: 12.5px;
   font-weight: 700;
   color: #ffffff;
+  text-align: right;
   font-variant-numeric: tabular-nums;
-  flex-shrink: 0;
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 </style>
