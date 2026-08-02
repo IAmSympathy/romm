@@ -49,7 +49,7 @@ export const UI_SETTINGS_KEYS = {
   },
   libraryStatsMode: {
     key: "settings.libraryStatsMode",
-    default: "compact",
+    default: "extended",
   },
   // Widget render order — comma-separated list of widget IDs.
   // Persisted as a string in localStorage (the useUISettings helper
@@ -62,7 +62,7 @@ export const UI_SETTINGS_KEYS = {
   },
 
   // Platforms drawer
-  platformsGroupBy: { key: "settings.platformsGroupBy", default: null },
+  platformsGroupBy: { key: "settings.platformsGroupBy", default: "generation" },
 
   // Gallery section
   groupRoms: { key: "settings.groupRoms", default: true },
@@ -82,11 +82,11 @@ export const UI_SETTINGS_KEYS = {
   // Per-page boxart styles
   boxartStyleDetails: {
     key: "settings.boxartStyleDetails",
-    default: "cover_path",
+    default: "box3d_path",
   },
   boxartStylePlayer: {
     key: "settings.boxartStylePlayer",
-    default: "cover_path",
+    default: "physical_path",
   },
 
   // Gameplay

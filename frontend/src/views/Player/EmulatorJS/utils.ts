@@ -231,12 +231,92 @@ function installDefaultOptionsFallback(emulator: any) {
   }
 }
 
+function installAudioTap() {
+  const w = window as any;
+  if (w.__ejsNetplayAudioTapInstalled) return;
+  w.__ejsNetplayAudioTapInstalled = true;
+
+  const tap = (w.__ejsNetplayAudioTap = {
+    caps: new WeakMap(),
+    last: null as AudioContext | null,
+  });
+  const origConnect = AudioNode.prototype.connect;
+
+  AudioNode.prototype.connect = function (this: AudioNode, target: any) {
+    try {
+      const ctx = this.context as AudioContext & { __masterVolumeGain?: GainNode };
+      if (ctx && target === ctx.destination) {
+        tap.last = ctx;
+        const curVolStr = localStorage.getItem("romm_saved_volume");
+        const currentVol =
+          curVolStr !== null && !isNaN(parseFloat(curVolStr)) ? parseFloat(curVolStr) : 1.0;
+
+        if (!ctx.__masterVolumeGain) {
+          const masterGain = ctx.createGain();
+          masterGain.gain.value = currentVol;
+          origConnect.call(masterGain, ctx.destination);
+          ctx.__masterVolumeGain = masterGain;
+        } else {
+          ctx.__masterVolumeGain.gain.value = currentVol;
+        }
+
+        let cap = tap.caps.get(ctx);
+        if (!cap) {
+          cap = ctx.createMediaStreamDestination();
+          tap.caps.set(ctx, cap);
+        }
+        origConnect.call(this, cap);
+        return origConnect.call(this, ctx.__masterVolumeGain);
+      }
+    } catch {
+      // Ignore audio tap errors
+    }
+    return origConnect.apply(this, arguments as any);
+  };
+}
+
+function patchNetplayAudio(netplay: any) {
+  if (!netplay || netplay.__netplayAudioFixed) return;
+  netplay.__netplayAudioFixed = true;
+
+  netplay._captureHostAudio = function (this: any) {
+    try {
+      const w = window as any;
+      const tap = w.__ejsNetplayAudioTap;
+      const ctx =
+        (tap && tap.last) ||
+        (this.emu &&
+          this.emu.Module &&
+          this.emu.Module.AL &&
+          this.emu.Module.AL.currentCtx &&
+          this.emu.Module.AL.currentCtx.audioCtx) ||
+        (this.emu && this.emu.gameManager && this.emu.gameManager.audioContext);
+
+      if (!ctx) return null;
+      if (ctx.state !== "running") ctx.resume().catch(() => {});
+
+      let cap = tap && tap.caps.get(ctx);
+      if (!cap) {
+        cap = ctx.createMediaStreamDestination();
+        if (tap) tap.caps.set(ctx, cap);
+      }
+      this._hostAudioDest = cap;
+      const stream = cap.stream;
+      const tracks = stream ? stream.getAudioTracks() : [];
+      return tracks.length ? stream : null;
+    } catch {
+      return null;
+    }
+  };
+}
+
 // Trap the window.EJS_emulator assignment so the instance is patched right
 // after the constructor returns, before the async core download and boot
 // consume any of the patched values. Patching later (e.g. in EJS_onGameStart)
 // is too late: by then the GL context exists, retroarch.cfg and the core
 // options file are written, and saved settings were already applied.
 export function installEJSDefaultOptionsTrap() {
+  installAudioTap();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let instance: any;
   Object.defineProperty(window, "EJS_emulator", {
@@ -244,7 +324,10 @@ export function installEJSDefaultOptionsTrap() {
     get: () => instance,
     set: (value) => {
       instance = value;
-      if (value) installDefaultOptionsFallback(value);
+      if (value) {
+        installDefaultOptionsFallback(value);
+        if (value.netplay) patchNetplayAudio(value.netplay);
+      }
     },
   });
 }

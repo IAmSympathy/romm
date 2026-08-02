@@ -24,7 +24,7 @@ export type GroupByMode =
 export type LayoutMode = "grid" | "list";
 export type ToolbarPosition = "header" | "floating";
 
-const groupBy = useLocalStorage<GroupByMode>("v2.gallery.groupBy", "none");
+const groupBy = useLocalStorage<GroupByMode>("v2.gallery.groupBy", "generation");
 const layout = useLocalStorage<LayoutMode>("v2.gallery.layout", "grid");
 const toolbarPosition = useLocalStorage<ToolbarPosition>(
   "v2.gallery.toolbarPosition",

@@ -409,9 +409,9 @@ const generationGroups = computed<Bucket[]>(() =>
     (p) => {
       const g = p.generation;
       if (typeof g === "number" && g > 0) {
-        // Pad the key so string sort puts "9" before "10".
+        // Pad the key so string sort puts "9" before "10", and 99 (Cloud) near the end before unknown.
         return {
-          key: g.toString().padStart(4, "0"),
+          key: g === 99 ? "9999" : g.toString().padStart(4, "0"),
           label: platformGenerationLabel(g),
         };
       }

@@ -78,6 +78,7 @@ export function prettifyPlatformCategory(raw: string): string {
 
 /** "1st generation" / "2nd generation" / … with English ordinals. */
 export function platformGenerationLabel(n: number): string {
+  if (n === 99) return "Cloud";
   const mod10 = n % 10;
   const mod100 = n % 100;
   let suffix: string;

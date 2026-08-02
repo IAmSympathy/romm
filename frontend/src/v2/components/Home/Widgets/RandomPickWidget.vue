@@ -77,19 +77,36 @@ function rollDiceFace() {
   diceFace.value = others[Math.floor(Math.random() * others.length)];
 }
 
+const totalRoms = ref<number | null>(null);
+
 // One attempt at a pick. `null` means the library holds no roms;
 // `undefined` means the offset came back empty, which the backend's
 // cached id index makes possible when it drifts from the database
 // between the two calls (a scan, a deletion).
 async function pickOnce(): Promise<SimpleRom | null | undefined> {
-  const { data: head } = await romApi.getRoms({ ...PICK_QUERY, offset: 0 });
-  if (!head.total) return null;
+  if (totalRoms.value === null) {
+    const { data: head } = await romApi.getRoms({ ...PICK_QUERY, offset: 0 });
+    if (!head.total) return null;
+    totalRoms.value = head.total;
+  }
 
   const { data: result } = await romApi.getRoms({
     ...PICK_QUERY,
-    offset: Math.floor(Math.random() * head.total),
+    offset: Math.floor(Math.random() * totalRoms.value),
   });
-  return result.items.at(0);
+  const rom = result.items.at(0);
+  if (rom) {
+    const coverUrl = rom.cover_url || (rom as any)?.metadatum?.cover_url;
+    if (coverUrl) {
+      await new Promise<void>((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve();
+        img.onerror = () => resolve();
+        img.src = coverUrl;
+      });
+    }
+  }
+  return rom;
 }
 
 async function reroll({ notify }: { notify: boolean }) {
@@ -101,7 +118,10 @@ async function reroll({ notify }: { notify: boolean }) {
   try {
     let rom = await pickOnce();
     // Drift is worth one retry, since the second attempt re-reads the total.
-    if (rom === undefined) rom = await pickOnce();
+    if (rom === undefined) {
+      totalRoms.value = null;
+      rom = await pickOnce();
+    }
     if (rom === undefined) throw new Error("random pick came back empty");
     pick.value = rom;
     failed.value = false;

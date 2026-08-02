@@ -41,6 +41,8 @@ async def add_state(
     request: Request,
     rom_id: int,
     emulator: str | None = None,
+    is_public: bool | None = None,
+    public_states: bool | None = None,
     stateFile: UploadFile = STATE_FILE_UPLOAD,
     screenshotFile: UploadFile | None = STATE_SCREENSHOT_UPLOAD,
 ) -> StateSchema:
@@ -53,30 +55,28 @@ async def add_state(
 
     log.info(f"Uploading state of {rom.name}")
 
-    states_path = fs_asset_handler.build_states_file_path(
-        user=request.user,
-        platform_fs_slug=rom.platform.fs_slug,
-        rom_id=rom_id,
-        emulator=emulator,
+    is_arcade = (rom.platform.fs_slug == "arcade")
+    effective_is_public = (
+        True
+        if is_arcade
+        else (public_states if public_states is not None else (is_public if is_public is not None else False))
     )
 
-    if not stateFile.filename:
-        log.error("State file has no filename")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="State file has no filename"
-        )
-
-    try:
-        sanitized_state_filename = sanitize_filename(stateFile.filename)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid state filename: {str(exc)}",
-        ) from exc
-
-    rom = db_rom_handler.get_rom(rom_id)
-    if not rom:
-        raise RomNotFoundInDatabaseException(rom_id)
+    if is_arcade:
+        sanitized_state_filename = sanitize_filename(f"{rom.name} (Public Highscore).state")
+    else:
+        if not stateFile.filename:
+            log.error("State file has no filename")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="State file has no filename"
+            )
+        try:
+            sanitized_state_filename = sanitize_filename(stateFile.filename)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid state filename: {str(exc)}",
+            ) from exc
 
     log.info(
         f"Uploading state {hl(sanitized_state_filename)} for {hl(str(rom.name), color=BLUE)}"
@@ -101,27 +101,69 @@ async def add_state(
         rom_id=rom_id,
         emulator=emulator,
     )
-    db_state = db_state_handler.get_state_by_filename(
-        user_id=request.user.id, rom_id=rom.id, file_name=sanitized_state_filename
-    )
-    if db_state:
-        db_state = db_state_handler.update_state(
-            db_state.id, {"file_size_bytes": scanned_state.file_size_bytes}
-        )
+
+    if is_arcade:
+        from sqlalchemy import select
+        from decorators.database import sync_session
+        from models.assets import State as StateModel
+
+        with sync_session.begin() as db_session:
+            existing_states = db_session.scalars(
+                select(StateModel).filter_by(rom_id=rom.id, emulator=emulator)
+            ).all()
+
+        if existing_states:
+            db_state = existing_states[0]
+            db_state = db_state_handler.update_state(
+                db_state.id,
+                {
+                    "file_name": sanitized_state_filename,
+                    "file_size_bytes": scanned_state.file_size_bytes,
+                    "user_id": request.user.id,
+                    "emulator": emulator,
+                    "is_public": True,
+                    "updated_at": datetime.now(timezone.utc),
+                },
+            )
+            for extra_state in existing_states[1:]:
+                db_state_handler.delete_state(extra_state.id)
+        else:
+            scanned_state.rom_id = rom.id
+            scanned_state.user_id = request.user.id
+            scanned_state.emulator = emulator
+            scanned_state.is_public = True
+            scanned_state.file_name = sanitized_state_filename
+            db_state = db_state_handler.add_state(state=scanned_state)
     else:
-        scanned_state.rom_id = rom.id
-        scanned_state.user_id = request.user.id
-        scanned_state.emulator = emulator
-        db_state = db_state_handler.add_state(state=scanned_state)
+        db_state = db_state_handler.get_state_by_filename(
+            user_id=request.user.id, rom_id=rom.id, file_name=sanitized_state_filename
+        )
+        if db_state:
+            db_state = db_state_handler.update_state(
+                db_state.id,
+                {
+                    "file_size_bytes": scanned_state.file_size_bytes,
+                    "is_public": effective_is_public,
+                },
+            )
+        else:
+            scanned_state.rom_id = rom.id
+            scanned_state.user_id = request.user.id
+            scanned_state.emulator = emulator
+            scanned_state.is_public = effective_is_public
+            db_state = db_state_handler.add_state(state=scanned_state)
 
     if screenshotFile and screenshotFile.filename:
-        try:
-            sanitized_screenshot_filename = sanitize_filename(screenshotFile.filename)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid screenshot filename: {str(exc)}",
-            ) from exc
+        if is_arcade:
+            sanitized_screenshot_filename = sanitize_filename(f"{rom.name} (Public Highscore).png")
+        else:
+            try:
+                sanitized_screenshot_filename = sanitize_filename(screenshotFile.filename)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid screenshot filename: {str(exc)}",
+                ) from exc
 
         screenshots_path = fs_asset_handler.build_screenshots_file_path(
             user=request.user, platform_fs_slug=rom.platform_slug, rom_id=rom.id
@@ -140,22 +182,56 @@ async def add_state(
             platform_fs_slug=rom.platform_slug,
             rom_id=rom.id,
         )
-        db_screenshot = db_screenshot_handler.get_screenshot(
-            file_name=sanitized_screenshot_filename,
-            rom_id=rom.id,
-            user_id=request.user.id,
-        )
-        if db_screenshot:
-            db_screenshot = db_screenshot_handler.update_screenshot(
-                db_screenshot.id,
-                {"file_size_bytes": scanned_screenshot.file_size_bytes},
-            )
+
+        if is_arcade:
+            from models.assets import Screenshot as ScreenshotModel
+            with sync_session.begin() as db_session:
+                existing_ss = db_session.scalars(
+                    select(ScreenshotModel).filter_by(rom_id=rom.id)
+                ).all()
+
+            if existing_ss:
+                db_screenshot = existing_ss[0]
+                db_screenshot = db_screenshot_handler.update_screenshot(
+                    db_screenshot.id,
+                    {
+                        "file_name": sanitized_screenshot_filename,
+                        "file_name_no_ext": f"{rom.name} (Public Highscore)",
+                        "file_size_bytes": scanned_screenshot.file_size_bytes,
+                        "user_id": request.user.id,
+                        "is_public": True,
+                        "updated_at": datetime.now(timezone.utc),
+                    },
+                )
+                for extra_ss in existing_ss[1:]:
+                    db_screenshot_handler.delete_screenshot(extra_ss.id)
+            else:
+                scanned_screenshot.rom_id = rom.id
+                scanned_screenshot.user_id = request.user.id
+                scanned_screenshot.is_public = True
+                scanned_screenshot.file_name = sanitized_screenshot_filename
+                scanned_screenshot.file_name_no_ext = f"{rom.name} (Public Highscore)"
+                db_screenshot = db_screenshot_handler.add_screenshot(
+                    screenshot=scanned_screenshot
+                )
         else:
-            scanned_screenshot.rom_id = rom.id
-            scanned_screenshot.user_id = request.user.id
-            db_screenshot = db_screenshot_handler.add_screenshot(
-                screenshot=scanned_screenshot
+            db_screenshot = db_screenshot_handler.get_screenshot(
+                file_name=sanitized_screenshot_filename,
+                rom_id=rom.id,
+                user_id=request.user.id,
             )
+            if db_screenshot:
+                db_screenshot = db_screenshot_handler.update_screenshot(
+                    db_screenshot.id,
+                    {"file_size_bytes": scanned_screenshot.file_size_bytes},
+                )
+            else:
+                scanned_screenshot.rom_id = rom.id
+                scanned_screenshot.user_id = request.user.id
+                scanned_screenshot.is_public = effective_is_public
+                db_screenshot = db_screenshot_handler.add_screenshot(
+                    screenshot=scanned_screenshot
+                )
 
     # Set the last played time for the current user
     rom_user = db_rom_handler.get_rom_user(rom_id=rom.id, user_id=request.user.id)
