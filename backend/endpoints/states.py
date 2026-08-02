@@ -223,7 +223,10 @@ async def add_state(
             if db_screenshot:
                 db_screenshot = db_screenshot_handler.update_screenshot(
                     db_screenshot.id,
-                    {"file_size_bytes": scanned_screenshot.file_size_bytes},
+                    {
+                        "file_size_bytes": scanned_screenshot.file_size_bytes,
+                        "is_public": effective_is_public,
+                    },
                 )
             else:
                 scanned_screenshot.rom_id = rom.id

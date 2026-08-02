@@ -35,6 +35,7 @@ import {
   createSaveQuitButton,
   createExitEmulationButton,
 } from "./utils";
+import "@/v2/styles/emulatorjs-modern.css";
 
 const INVALID_CHARS_REGEX = /[#<$+%>!`&*'|{}/\\?"=@:^\r\n]/gi;
 

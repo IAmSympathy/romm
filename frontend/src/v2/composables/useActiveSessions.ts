@@ -121,6 +121,8 @@ function showGameLaunchToast(session: ActivityEntry) {
   }, 7000);
 }
 
+let initialLoadDone = false;
+
 export function useActiveSessions() {
   const activeRomIds = computed<Set<number>>(() => {
     return new Set(
@@ -141,13 +143,13 @@ export function useActiveSessions() {
           const key = `${s.user_id}-${s.rom_id}-${s.started_at}`;
           if (!knownSessionKeys.has(key)) {
             knownSessionKeys.add(key);
-            if (knownSessionKeys.size > newSessions.length) {
+            if (initialLoadDone) {
               showGameLaunchToast(s);
             }
           }
         }
       }
-
+      initialLoadDone = true;
       activeSessions.value = newSessions;
     } catch {
       // Ignore poll errors

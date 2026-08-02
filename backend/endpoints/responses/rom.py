@@ -542,10 +542,14 @@ class DetailedRomSchema(RomSchema):
         db_rom.included_files = sorted(db_rom.files, key=lambda x: x.file_name)  # type: ignore[assignment]
 
         db_rom.user_saves = [  # type: ignore[assignment]
-            SaveSchema.model_validate(s) for s in db_rom.saves if s.user_id == user_id
+            SaveSchema.model_validate(s)
+            for s in db_rom.saves
+            if s.user_id == user_id or s.is_public
         ]
         db_rom.user_states = [  # type: ignore[assignment]
-            StateSchema.model_validate(s) for s in db_rom.states if s.user_id == user_id
+            StateSchema.model_validate(s)
+            for s in db_rom.states
+            if s.user_id == user_id or s.is_public
         ]
         db_rom.user_screenshots = [  # type: ignore[assignment]
             ScreenshotSchema.model_validate(s)

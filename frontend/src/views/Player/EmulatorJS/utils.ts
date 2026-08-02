@@ -236,6 +236,10 @@ function installAudioTap() {
   if (w.__ejsNetplayAudioTapInstalled) return;
   w.__ejsNetplayAudioTapInstalled = true;
 
+  const savedVolStr = localStorage.getItem("romm_saved_volume") || localStorage.getItem("volume");
+  const initVol = savedVolStr !== null && !isNaN(parseFloat(savedVolStr)) ? parseFloat(savedVolStr) : 1.0;
+  w.__ejsCurrentVolume = initVol;
+
   const tap = (w.__ejsNetplayAudioTap = {
     caps: new WeakMap(),
     last: null as AudioContext | null,
@@ -249,7 +253,7 @@ function installAudioTap() {
         tap.last = ctx;
         const curVolStr = localStorage.getItem("romm_saved_volume");
         const currentVol =
-          curVolStr !== null && !isNaN(parseFloat(curVolStr)) ? parseFloat(curVolStr) : 1.0;
+          curVolStr !== null && !isNaN(parseFloat(curVolStr)) ? parseFloat(curVolStr) : w.__ejsCurrentVolume;
 
         if (!ctx.__masterVolumeGain) {
           const masterGain = ctx.createGain();
@@ -273,6 +277,75 @@ function installAudioTap() {
     }
     return origConnect.apply(this, arguments as any);
   };
+
+  w.__setEjsGlobalVolume = function (vol: number) {
+    vol = Math.max(0, Math.min(1, parseFloat(vol as any)));
+    w.__ejsCurrentVolume = vol;
+    try {
+      localStorage.setItem("romm_saved_volume", vol.toString());
+      localStorage.setItem("volume", vol.toString());
+    } catch {}
+
+    if (w.__ejsNetplayAudioTap && w.__ejsNetplayAudioTap.last) {
+      const ctx = w.__ejsNetplayAudioTap.last;
+      if (ctx.__masterVolumeGain) {
+        ctx.__masterVolumeGain.gain.value = vol;
+      }
+    }
+    if (
+      w.EJS_emulator &&
+      w.EJS_emulator.Module &&
+      w.EJS_emulator.Module.AL &&
+      w.EJS_emulator.Module.AL.currentCtx &&
+      w.EJS_emulator.Module.AL.currentCtx.sources
+    ) {
+      w.EJS_emulator.Module.AL.currentCtx.sources.forEach((s: any) => {
+        if (s && s.gain && s.gain.gain) {
+          s.gain.gain.value = vol;
+        }
+      });
+    }
+    if (w.EJS_emulator) {
+      w.EJS_emulator.volume = vol;
+    }
+  };
+
+  if (!w.__ejsVolumeSyncInterval) {
+    w.__ejsVolumeSyncInterval = setInterval(() => {
+      const curSaved = parseFloat(
+        localStorage.getItem("romm_saved_volume") || w.__ejsCurrentVolume || "1.0"
+      );
+      if (w.__ejsNetplayAudioTap && w.__ejsNetplayAudioTap.last) {
+        const ctx = w.__ejsNetplayAudioTap.last;
+        if (ctx.__masterVolumeGain && Math.abs(ctx.__masterVolumeGain.gain.value - curSaved) > 0.001) {
+          ctx.__masterVolumeGain.gain.value = curSaved;
+        }
+      }
+
+      const volSliders = document.querySelectorAll<HTMLInputElement>(
+        'input[data-range="volume"], .ejs_volume_parent input[type="range"]'
+      );
+      volSliders.forEach((slider) => {
+        if (!slider.dataset.volumeFixed) {
+          slider.dataset.volumeFixed = "true";
+          slider.value = curSaved.toString();
+
+          const updateVol = () => {
+            const val = parseFloat(slider.value);
+            w.__setEjsGlobalVolume(val);
+          };
+
+          ["input", "change", "mousemove", "touchmove", "mouseup", "touchend"].forEach((evt) => {
+            slider.addEventListener(evt, updateVol, { passive: true });
+          });
+        } else if (!document.activeElement || document.activeElement !== slider) {
+          if (Math.abs(parseFloat(slider.value) - curSaved) > 0.01) {
+            slider.value = curSaved.toString();
+          }
+        }
+      });
+    }, 200);
+  }
 }
 
 function patchNetplayAudio(netplay: any) {

@@ -362,8 +362,17 @@ watch(selectedCore, (newSelectedCore) => {
     selectedState.value.emulator &&
     selectedState.value.emulator !== newSelectedCore
   ) {
-    selectedState.value = null;
-    localStorage.removeItem(`player:${rom.value?.platform_slug}:state_id`);
+    const compatible =
+      rom.value?.user_states.filter(
+        (st) => !st.emulator || st.emulator === newSelectedCore,
+      ) ?? [];
+    if (compatible.length > 0) {
+      selectedState.value = compatible[0];
+      isSavesTabSelected.value = false;
+    } else {
+      selectedState.value = null;
+      localStorage.removeItem(`player:${rom.value?.platform_slug}:state_id`);
+    }
   }
 });
 

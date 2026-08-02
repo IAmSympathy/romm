@@ -460,7 +460,6 @@ const _EJS_CORES_MAP: Record<string, string[]> = {
   amiga: ["puae"],
   "amiga-cd32": ["puae"],
   arcade: [
-    "mame2003",
     "mame2003_plus",
     "fbneo",
     "fbalpha2012_cps1",

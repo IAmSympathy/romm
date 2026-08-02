@@ -92,22 +92,71 @@ class ActivityHandler:
         except ValueError:
             return None
 
+    ONLINE_TTL = 60  # seconds
+    ONLINE_KEY_PREFIX = "activity:online:"
+
+    def _online_key(self, user_id: int) -> str:
+        return f"{self.ONLINE_KEY_PREFIX}{user_id}"
+
+    async def set_online(self, user_id: int, username: str, avatar_path: str) -> None:
+        """Store or refresh an online user's presence."""
+        key = self._online_key(user_id)
+        entry: ActivityEntry = {
+            "user_id": user_id,
+            "username": username,
+            "avatar_path": avatar_path or "",
+            "rom_id": 0,
+            "rom_name": "",
+            "rom_cover_path": "",
+            "screenshot_path": "",
+            "platform_slug": "",
+            "platform_name": "",
+            "device_id": "web",
+            "device_type": "web",
+            "started_at": "",
+        }
+        await async_cache.set(key, json.dumps(entry), ex=self.ONLINE_TTL)
+
+    async def clear_online(self, user_id: int) -> None:
+        """Remove online presence for a user."""
+        await async_cache.delete(self._online_key(user_id))
+
     async def get_all_active(self) -> list[ActivityEntry]:
-        """Get all currently active play sessions across all users."""
+        """Get all currently active play sessions across all users plus online non-playing users."""
         pattern = f"{self.KEY_PREFIX}*"
         keys = [key async for key in async_cache.scan_iter(match=pattern)]
-        if not keys:
-            return []
 
-        # Single round-trip for every value instead of a GET per key.
         entries: list[ActivityEntry] = []
-        for raw in await async_cache.mget(keys):
-            if not raw:
-                continue
-            try:
-                entries.append(json.loads(raw))
-            except ValueError:
-                continue
+        playing_user_ids: set[int] = set()
+
+        if keys:
+            for raw in await async_cache.mget(keys):
+                if not raw:
+                    continue
+                try:
+                    entry = json.loads(raw)
+                    entries.append(entry)
+                    if entry.get("user_id"):
+                        playing_user_ids.add(int(entry["user_id"]))
+                except ValueError:
+                    continue
+
+        # Also collect online non-playing users
+        online_pattern = f"{self.ONLINE_KEY_PREFIX}*"
+        online_keys = [key async for key in async_cache.scan_iter(match=online_pattern)]
+        if online_keys:
+            for raw in await async_cache.mget(online_keys):
+                if not raw:
+                    continue
+                try:
+                    entry = json.loads(raw)
+                    user_id = entry.get("user_id")
+                    # Only include if user is not currently playing a game
+                    if user_id and int(user_id) not in playing_user_ids:
+                        entries.append(entry)
+                except ValueError:
+                    continue
+
         return entries
 
     async def get_active_for_rom(self, rom_id: int) -> list[ActivityEntry]:

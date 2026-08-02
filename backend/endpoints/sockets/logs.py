@@ -18,6 +18,7 @@ import socketio  # type: ignore
 
 from config import DISABLE_LOGS_VIEWER, REDIS_URL
 from endpoints.sockets.activity import store_authenticated_user
+from handler.activity_handler import activity_handler
 from handler.database import db_user_handler
 from handler.redis_handler import async_cache
 from handler.socket_handler import socket_handler
@@ -56,6 +57,7 @@ async def connect(sid: str, environ: dict[str, Any], auth: Any = None) -> None:
             return
 
         await store_authenticated_user(sid, user.id)
+        await activity_handler.set_online(user.id, user.username, user.avatar_path or "")
 
         if not DISABLE_LOGS_VIEWER and user.role == Role.ADMIN:
             await socket_handler.socket_server.enter_room(sid, ADMIN_ROOM)

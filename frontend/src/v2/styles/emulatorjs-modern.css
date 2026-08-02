@@ -1,0 +1,166 @@
+/* Modern Glassmorphism & Clean Controls Theme for EmulatorJS */
+
+div#game .ejs_popup_container,
+div#game .ejs_control_container,
+div#game .ejs_menu_bar_parent {
+  font-family: var(--r-font-sans, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif) !important;
+}
+
+/* Glassmorphism Popups */
+div#game .ejs_popup_container {
+  display: flex !important;
+  flex-direction: column !important;
+  background: rgba(20, 20, 32, 0.92) !important;
+  backdrop-filter: blur(18px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7) !important;
+  color: #ffffff !important;
+  padding: 24px 28px !important;
+  min-width: 520px !important;
+  max-width: 720px !important;
+  width: auto !important;
+  height: auto !important;
+  max-height: 85vh !important;
+  box-sizing: border-box !important;
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  z-index: 99999 !important;
+  overflow: hidden !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+div#game .ejs_popup_container > h4 {
+  color: #ffffff !important;
+  font-size: 20px !important;
+  font-weight: 700 !important;
+  margin: 0 0 14px 0 !important;
+  padding-bottom: 10px !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
+  text-align: center !important;
+  flex-shrink: 0 !important;
+}
+
+div#game .ejs_popup_body,
+div#game .ejs_control_body {
+  width: 100% !important;
+  height: auto !important;
+  max-height: calc(85vh - 70px) !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  box-sizing: border-box !important;
+  padding-right: 4px !important;
+  flex: 1 1 auto !important;
+}
+
+/* Modern Action Buttons */
+div#game .ejs_popup_container > a.ejs_button:not(.ejs_close_icon):not(.ejs_hidden_btn),
+div#game a.ejs_button:not(.ejs_close_icon):not(.ejs_hidden_btn),
+div#game .ejs_popup_submit:not(.ejs_hidden_btn),
+div#game .ejs_button_button:not(.ejs_subpopup_close_btn):not(.ejs_hidden_btn),
+div#game .ejs_netplay_join_button:not(.ejs_hidden_btn) {
+  background: #7c3aed !important;
+  color: #ffffff !important;
+  border: none !important;
+  border-radius: 8px !important;
+  font-weight: 600 !important;
+  font-size: 13.5px !important;
+  padding: 10px 22px !important;
+  cursor: pointer !important;
+  text-decoration: none !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin: 14px 10px 4px 0 !important;
+  box-shadow: none !important;
+  transition: background-color 0.15s ease !important;
+}
+
+div#game .ejs_popup_container > a.ejs_button:not(.ejs_close_icon):not(.ejs_hidden_btn):hover,
+div#game a.ejs_button:not(.ejs_close_icon):not(.ejs_hidden_btn):hover,
+div#game .ejs_popup_submit:not(.ejs_hidden_btn):hover,
+div#game .ejs_button_button:not(.ejs_subpopup_close_btn):not(.ejs_hidden_btn):hover,
+div#game .ejs_netplay_join_button:hover {
+  background: #6d28d9 !important;
+  box-shadow: none !important;
+}
+
+/* Round Close Icon */
+div#game .ejs_popup_container > a.ejs_button.ejs_close_icon,
+div#game .ejs_popup_container > a.ejs_close_icon,
+div#game .ejs_popup_container_box a.ejs_close_icon,
+div#game .ejs_cheat_parent a.ejs_close_icon,
+div#game .ejs_subpopup_close_icon {
+  position: absolute !important;
+  top: 16px !important;
+  right: 16px !important;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  min-height: 32px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border-radius: 50% !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #94a3b8 !important;
+  font-size: 16px !important;
+  font-weight: bold !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: none !important;
+  cursor: pointer !important;
+  text-decoration: none !important;
+  transition: background 0.15s ease, color 0.15s ease !important;
+  z-index: 100001 !important;
+}
+
+div#game .ejs_popup_container > a.ejs_button.ejs_close_icon:hover,
+div#game .ejs_popup_container > a.ejs_close_icon:hover,
+div#game .ejs_popup_container_box a.ejs_close_icon:hover,
+div#game .ejs_cheat_parent a.ejs_close_icon:hover,
+div#game .ejs_subpopup_close_icon:hover {
+  background: rgba(255, 255, 255, 0.18) !important;
+  color: #ffffff !important;
+}
+
+/* Confirmation Box */
+div#game .ejs_popup_box {
+  background: rgba(24, 24, 40, 0.98) !important;
+  border: 1px solid rgba(138, 92, 246, 0.5) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9), 0 0 40px rgba(124, 58, 237, 0.3) !important;
+  padding: 36px 44px !important;
+  min-width: 400px !important;
+  min-height: 200px !important;
+  width: auto !important;
+  height: auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  margin: 0 auto !important;
+  z-index: 100006 !important;
+  color: #ffffff !important;
+  box-sizing: border-box !important;
+}
+
+/* Touch & Canvas pointer optimization */
+#game,
+#game canvas,
+.ejs_canvas_parent,
+.ejs_canvas_parent canvas {
+  pointer-events: auto !important;
+  touch-action: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}

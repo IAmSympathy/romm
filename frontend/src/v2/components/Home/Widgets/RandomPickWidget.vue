@@ -79,7 +79,8 @@ function rollDiceFace() {
   diceFace.value = others[Math.floor(Math.random() * others.length)];
 }
 
-const totalRoms = ref<number | null>(null);
+let globalLibraryTotal: number | null = null;
+const totalRoms = ref<number | null>(globalLibraryTotal);
 
 // One attempt at a pick. `null` means the library holds no roms;
 // `undefined` means the offset came back empty, which the backend's
@@ -87,13 +88,23 @@ const totalRoms = ref<number | null>(null);
 // between the two calls (a scan, a deletion).
 async function pickOnce(): Promise<SimpleRom | null | undefined> {
   if (totalRoms.value === null) {
-    const { data: head } = await romApi.getRoms({ ...PICK_QUERY, offset: 0 });
-    if (!head.total) return null;
-    totalRoms.value = head.total;
+    if (globalLibraryTotal !== null) {
+      totalRoms.value = globalLibraryTotal;
+    } else {
+      const { data: head } = await romApi.getRoms({
+        ...PICK_QUERY,
+        offset: 0,
+        withTotal: true,
+      });
+      if (!head.total) return null;
+      totalRoms.value = head.total;
+      globalLibraryTotal = head.total;
+    }
   }
 
   const { data: result } = await romApi.getRoms({
     ...PICK_QUERY,
+    withTotal: false,
     offset: Math.floor(Math.random() * totalRoms.value),
   });
   const rom = result.items.at(0);
@@ -123,6 +134,7 @@ async function reroll({ notify }: { notify: boolean }) {
     let rom = await pickOnce();
     if (rom === undefined) {
       totalRoms.value = null;
+      globalLibraryTotal = null;
       rom = await pickOnce();
     }
     if (rom === undefined) throw new Error("random pick came back empty");
