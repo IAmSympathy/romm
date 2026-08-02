@@ -30,7 +30,7 @@ from utils.rate_limiter import ConcurrencyLimiter, RateLimiter
 import base64
 
 DEFAULT_SS_DEV_ID: Final = base64.b64decode("enVyZGkxNQ==").decode()
-DEFAULT_SS_DEV_PASSWORD: Final = base64.b64decode("eFRKd29PRmpPUUc=").decode()
+DEFAULT_SS_DEV_PASSWORD: Final = base64.b64decode("Z2RERkQ0R0ZnM1Jt").decode()
 LOGIN_ERROR_CHECK: Final = "Erreur de login"
 
 # ScreenScraper occasionally returns malformed JSON with unescaped backslashes in
