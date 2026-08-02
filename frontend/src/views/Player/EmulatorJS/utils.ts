@@ -15,6 +15,102 @@ function buildSaveName(rom: DetailedRom): string {
   return `${romName} [${new Date().toISOString().replace(/[:.]/g, "-").replace("T", " ").replace("Z", "")}]`;
 }
 
+export async function captureCanvasScreenshot(): Promise<ArrayBuffer | null> {
+  try {
+    if (window.EJS_emulator?.gameManager?.screenshot) {
+      const res = await window.EJS_emulator.gameManager.screenshot();
+      if (res instanceof ArrayBuffer) return res;
+      if (res instanceof Uint8Array) return res.buffer as ArrayBuffer;
+      if (res instanceof Blob) return await res.arrayBuffer();
+      if (typeof res === "string" && res.startsWith("data:")) {
+        const bin = atob(res.split(",")[1]);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        return arr.buffer as ArrayBuffer;
+      }
+    }
+  } catch (e) {
+    console.warn("gameManager.screenshot failed:", e);
+  }
+
+  // Fallback: grab directly from canvas in #game element
+  try {
+    const canvas = document.querySelector("#game canvas") as HTMLCanvasElement | null;
+    if (canvas && canvas.width > 0 && canvas.height > 0) {
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (blob) return await blob.arrayBuffer();
+    }
+  } catch (e) {
+    console.warn("Canvas capture failed:", e);
+  }
+
+  return null;
+}
+
+export async function normalizeScreenshotBuffer(
+  input?: any
+): Promise<ArrayBuffer | null> {
+  if (!input) return await captureCanvasScreenshot();
+
+  if (input instanceof ArrayBuffer) return input;
+  if (input instanceof Uint8Array) return input.buffer as ArrayBuffer;
+  if (input instanceof Blob) return await input.arrayBuffer();
+  if (typeof input === "string" && input.startsWith("data:")) {
+    const bin = atob(input.split(",")[1]);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return arr.buffer as ArrayBuffer;
+  }
+
+  return await captureCanvasScreenshot();
+}
+
+export function initEmulatorJSPopupObserver() {
+  const container = document.getElementById("game");
+  if (!container) return;
+
+  const observer = new MutationObserver(() => {
+    const popups = container.querySelectorAll<HTMLElement>(
+      ".ejs_popup_container, .ejs_popup_container_box, .ejs_control_container, .ejs_cheat_parent"
+    );
+
+    popups.forEach((popup) => {
+      // 1. Hide any bottom "Fermer" or "Close" text buttons
+      const buttons = popup.querySelectorAll<HTMLElement>("button, a.ejs_button");
+      buttons.forEach((btn) => {
+        const text = (btn.innerText || btn.textContent || "").trim().toLowerCase();
+        if (
+          text === "fermer" ||
+          text === "close" ||
+          btn.classList.contains("ejs_subpopup_close_btn") ||
+          btn.classList.contains("ejs_close_btn")
+        ) {
+          btn.style.display = "none";
+          btn.style.visibility = "hidden";
+        }
+      });
+
+      // 2. Ensure top-right ✕ close button exists
+      if (!popup.querySelector(".romm-popup-close-btn, .ejs_close_icon")) {
+        const closeBtn = document.createElement("a");
+        closeBtn.className = "romm-popup-close-btn";
+        closeBtn.innerHTML = "✕";
+        closeBtn.title = "Fermer";
+        closeBtn.setAttribute("role", "button");
+        closeBtn.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          popup.style.display = "none";
+          popup.setAttribute("hidden", "true");
+        };
+        popup.appendChild(closeBtn);
+      }
+    });
+  });
+
+  observer.observe(container, { childList: true, subtree: true, attributes: true });
+}
+
 export async function saveState({
   rom,
   stateFile,
@@ -22,7 +118,7 @@ export async function saveState({
 }: {
   rom: DetailedRom;
   stateFile: ArrayBuffer;
-  screenshotFile?: ArrayBuffer;
+  screenshotFile?: any;
 }): Promise<StateSchema | null> {
   // A zero-length buffer means the core failed to serialize its state (a torn
   // read from a running threaded core). Refuse to upload it so a broken
@@ -31,6 +127,9 @@ export async function saveState({
     console.error("Refusing to upload empty state file");
     return null;
   }
+
+  // Ensure every save state gets a valid PNG screenshot preview
+  const shotBuffer = await normalizeScreenshotBuffer(screenshotFile);
 
   const filename = buildStateName(rom);
   try {
@@ -42,9 +141,9 @@ export async function saveState({
           stateFile: new File([stateFile], `${filename}.state`, {
             type: "application/octet-stream",
           }),
-          screenshotFile: screenshotFile
-            ? new File([screenshotFile], `${filename}.png`, {
-                type: "application/octet-stream",
+          screenshotFile: shotBuffer
+            ? new File([shotBuffer], `${filename}.png`, {
+                type: "image/png",
               })
             : undefined,
         },

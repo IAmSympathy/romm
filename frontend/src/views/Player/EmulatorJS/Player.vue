@@ -31,6 +31,7 @@ import {
   loadEmulatorJSState,
   invalidateEmulatorJSRomCacheIfRenamed,
   installEJSDefaultOptionsTrap,
+  initEmulatorJSPopupObserver,
   createQuickLoadButton,
   createSaveQuitButton,
   createExitEmulationButton,
@@ -392,6 +393,7 @@ window.EJS_onGameStart = async () => {
   // global hotkeys). Callers flag this at launch too, but taking it from the
   // emulator's own start hook keeps the flag true for any entry point.
   playing.value = true;
+  initEmulatorJSPopupObserver();
 
   // Install netplay overrides synchronously, before any await below, so they
   // are in place before room polling or a Create/Join action can start.

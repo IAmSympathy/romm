@@ -6,19 +6,36 @@ div#game .ejs_menu_bar_parent {
   font-family: var(--r-font-sans, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif) !important;
 }
 
-/* Glassmorphism Popups */
-div#game .ejs_popup_container {
+/* 1. STRICT DISPLAY SAFETY: HIDE HIDDEN POPUPS & CONTAINERS */
+div#game .ejs_popup_container[style*="display: none"],
+div#game .ejs_popup_container[style*="display:none"],
+div#game .ejs_popup_container[hidden],
+div#game .ejs_control_container[style*="display: none"],
+div#game .ejs_control_container[style*="display:none"],
+div#game .ejs_control_container[hidden],
+div#game .ejs_popup_body > div[style*="display: none"],
+div#game .ejs_popup_body > div[style*="display:none"],
+div#game .ejs_popup_body > div[hidden],
+div#game [hidden] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* 2. GLASSMORPHISM POPUPS (ONLY VISIBLE ONES) */
+div#game .ejs_popup_container:not([style*="display: none"]):not([style*="display:none"]):not([hidden]) {
   display: flex !important;
   flex-direction: column !important;
-  background: rgba(20, 20, 32, 0.92) !important;
+  background: rgba(20, 20, 32, 0.94) !important;
   backdrop-filter: blur(18px) saturate(180%) !important;
   -webkit-backdrop-filter: blur(18px) saturate(180%) !important;
   border: 1px solid rgba(255, 255, 255, 0.18) !important;
   border-radius: 16px !important;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7) !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.75) !important;
   color: #ffffff !important;
   padding: 24px 28px !important;
-  min-width: 520px !important;
+  min-width: 480px !important;
   max-width: 720px !important;
   width: auto !important;
   height: auto !important;
@@ -30,7 +47,7 @@ div#game .ejs_popup_container {
   transform: translate(-50%, -50%) !important;
   z-index: 99999 !important;
   overflow: hidden !important;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  transition: opacity 0.15s ease, transform 0.15s ease !important;
 }
 
 div#game .ejs_popup_container > h4 {
@@ -56,11 +73,10 @@ div#game .ejs_control_body {
   flex: 1 1 auto !important;
 }
 
-/* Modern Action Buttons */
-div#game .ejs_popup_container > a.ejs_button:not(.ejs_close_icon):not(.ejs_hidden_btn),
-div#game a.ejs_button:not(.ejs_close_icon):not(.ejs_hidden_btn),
+/* 3. MODERN ACTION BUTTONS */
+div#game .ejs_popup_container > a.ejs_button:not(.ejs_close_icon):not(.ejs_hidden_btn):not(.ejs_subpopup_close_btn),
+div#game a.ejs_button:not(.ejs_close_icon):not(.ejs_hidden_btn):not(.ejs_subpopup_close_btn),
 div#game .ejs_popup_submit:not(.ejs_hidden_btn),
-div#game .ejs_button_button:not(.ejs_subpopup_close_btn):not(.ejs_hidden_btn),
 div#game .ejs_netplay_join_button:not(.ejs_hidden_btn) {
   background: #7c3aed !important;
   color: #ffffff !important;
@@ -82,18 +98,34 @@ div#game .ejs_netplay_join_button:not(.ejs_hidden_btn) {
 div#game .ejs_popup_container > a.ejs_button:not(.ejs_close_icon):not(.ejs_hidden_btn):hover,
 div#game a.ejs_button:not(.ejs_close_icon):not(.ejs_hidden_btn):hover,
 div#game .ejs_popup_submit:not(.ejs_hidden_btn):hover,
-div#game .ejs_button_button:not(.ejs_subpopup_close_btn):not(.ejs_hidden_btn):hover,
 div#game .ejs_netplay_join_button:hover {
   background: #6d28d9 !important;
   box-shadow: none !important;
 }
 
-/* Round Close Icon */
+/* HIDE ALL BOTTOM "FERMER" / "CLOSE" TEXT BUTTONS */
+div#game .ejs_popup_container a.ejs_subpopup_close_btn,
+div#game .ejs_popup_container button.ejs_close_btn,
+div#game .ejs_popup_container .ejs_button_button:not(.ejs_popup_submit),
+div#game .ejs_popup_container .ejs_hidden_btn,
+div#game .ejs_popup_container button.ejs_hidden_btn {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  height: 0 !important;
+  width: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* 4. TOP-RIGHT ROUND ✕ CLOSE ICON BUTTON */
 div#game .ejs_popup_container > a.ejs_button.ejs_close_icon,
 div#game .ejs_popup_container > a.ejs_close_icon,
 div#game .ejs_popup_container_box a.ejs_close_icon,
 div#game .ejs_cheat_parent a.ejs_close_icon,
-div#game .ejs_subpopup_close_icon {
+div#game .ejs_subpopup_close_icon,
+div#game .romm-popup-close-btn {
   position: absolute !important;
   top: 16px !important;
   right: 16px !important;
@@ -123,12 +155,13 @@ div#game .ejs_popup_container > a.ejs_button.ejs_close_icon:hover,
 div#game .ejs_popup_container > a.ejs_close_icon:hover,
 div#game .ejs_popup_container_box a.ejs_close_icon:hover,
 div#game .ejs_cheat_parent a.ejs_close_icon:hover,
-div#game .ejs_subpopup_close_icon:hover {
-  background: rgba(255, 255, 255, 0.18) !important;
+div#game .ejs_subpopup_close_icon:hover,
+div#game .romm-popup-close-btn:hover {
+  background: rgba(255, 255, 255, 0.22) !important;
   color: #ffffff !important;
 }
 
-/* Confirmation Box */
+/* 5. CONFIRMATION BOX */
 div#game .ejs_popup_box {
   background: rgba(24, 24, 40, 0.98) !important;
   border: 1px solid rgba(138, 92, 246, 0.5) !important;
@@ -138,29 +171,4 @@ div#game .ejs_popup_box {
   min-width: 400px !important;
   min-height: 200px !important;
   width: auto !important;
-  height: auto !important;
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  justify-content: center !important;
-  text-align: center !important;
-  position: absolute !important;
-  top: 50% !important;
-  left: 50% !important;
-  transform: translate(-50%, -50%) !important;
-  margin: 0 auto !important;
-  z-index: 100006 !important;
-  color: #ffffff !important;
-  box-sizing: border-box !important;
-}
-
-/* Touch & Canvas pointer optimization */
-#game,
-#game canvas,
-.ejs_canvas_parent,
-.ejs_canvas_parent canvas {
-  pointer-events: auto !important;
-  touch-action: none !important;
-  user-select: none !important;
-  -webkit-user-select: none !important;
 }
