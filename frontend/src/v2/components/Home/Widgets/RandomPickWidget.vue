@@ -111,15 +111,19 @@ async function pickOnce(): Promise<SimpleRom | null | undefined> {
   return rom;
 }
 
+const isInitialLoading = ref(true);
+
 async function reroll({ notify }: { notify: boolean }) {
-  if (loading.value) return;
   rollDiceFace();
-  // Disabling the button pulls focus to <body>; hand it back after.
   const hadFocus = document.activeElement === rerollEl();
-  loading.value = true;
+  
+  isSpinning.value = true;
+  setTimeout(() => {
+    isSpinning.value = false;
+  }, 400);
+
   try {
     let rom = await pickOnce();
-    // Drift is worth one retry, since the second attempt re-reads the total.
     if (rom === undefined) {
       totalRoms.value = null;
       rom = await pickOnce();
@@ -127,13 +131,20 @@ async function reroll({ notify }: { notify: boolean }) {
     if (rom === undefined) throw new Error("random pick came back empty");
     pick.value = rom;
     failed.value = false;
+
+    isBouncing.value = false;
+    await nextTick();
+    isBouncing.value = true;
+    setTimeout(() => {
+      isBouncing.value = false;
+    }, 500);
+
   } catch {
-    // Keep the previous pick: a failed request says nothing about whether
-    // the library holds games, so falling back to the empty copy would lie.
     failed.value = true;
     if (notify) snackbar.error(t("home.widget-random-pick-error"));
   } finally {
     loading.value = false;
+    isInitialLoading.value = false;
     if (hadFocus) {
       await nextTick();
       rerollEl()?.focus();
@@ -141,31 +152,16 @@ async function reroll({ notify }: { notify: boolean }) {
   }
 }
 
-function triggerAnimations() {
-  isSpinning.value = false;
-  isBouncing.value = false;
-  void nextTick(() => {
-    isSpinning.value = true;
-    isBouncing.value = true;
-    setTimeout(() => {
-      isSpinning.value = false;
-      isBouncing.value = false;
-    }, 650);
-  });
-}
-
 function onReroll() {
-  triggerAnimations();
   void reroll({ notify: true });
 }
 
-// The first pick is ours, not the user's: the card carries its own
-// failure copy, so it stays out of the snackbar stack.
+// The first pick is ours, not the user's
 onMounted(() => reroll({ notify: false }));
 </script>
 
 <template>
-  <WidgetCard title="SÉLECTION ALÉATOIRE" width="340px" :loading="loading">
+  <WidgetCard title="SÉLECTION ALÉATOIRE" width="320px" :loading="isInitialLoading">
     <template #action>
       <RBtn
         ref="rerollBtn"
