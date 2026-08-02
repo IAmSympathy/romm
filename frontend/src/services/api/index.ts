@@ -126,6 +126,17 @@ api.interceptors.response.use(
     // A 401 means there are no valid credentials behind the request: clear
     // the stale session and send the user to the login page.
     if (error.response?.status === 401) {
+      const detail = (error.response?.data as any)?.detail;
+      const isProviderError =
+        typeof detail === "string" &&
+        (detail.includes("ScreenScraper") ||
+          detail.includes("SGDB") ||
+          detail.includes("SteamGridDB") ||
+          detail.includes("provider"));
+      if (isProviderError) {
+        return Promise.reject(error);
+      }
+
       // Clear cookies and redirect to login page
       Cookies.remove("romm_session");
 
