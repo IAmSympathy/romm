@@ -27,6 +27,10 @@ from utils import get_version
 from utils.context import ctx_aiohttp_session
 from utils.rate_limiter import ConcurrencyLimiter, RateLimiter
 
+import base64
+
+DEFAULT_SS_DEV_ID: Final = base64.b64decode("enVyZGkxNQ==").decode()
+DEFAULT_SS_DEV_PASSWORD: Final = base64.b64decode("eFRKd29PRmpPUUc=").decode()
 LOGIN_ERROR_CHECK: Final = "Erreur de login"
 
 # ScreenScraper occasionally returns malformed JSON with unescaped backslashes in
@@ -419,8 +423,8 @@ async def auth_middleware(
     """ScreenScraper API authentication mechanism."""
     req.url = req.url.update_query(
         {
-            "devid": SCREENSCRAPER_DEV_ID or "",
-            "devpassword": SCREENSCRAPER_DEV_PASSWORD or "",
+            "devid": SCREENSCRAPER_DEV_ID or DEFAULT_SS_DEV_ID,
+            "devpassword": SCREENSCRAPER_DEV_PASSWORD or DEFAULT_SS_DEV_PASSWORD,
             "output": "json",
             "softname": "romm",
             "ssid": SCREENSCRAPER_USER or "",
