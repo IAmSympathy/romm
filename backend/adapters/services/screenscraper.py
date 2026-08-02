@@ -419,8 +419,8 @@ async def auth_middleware(
     """ScreenScraper API authentication mechanism."""
     req.url = req.url.update_query(
         {
-            "devid": SCREENSCRAPER_DEV_ID or "zurdi15",
-            "devpassword": SCREENSCRAPER_DEV_PASSWORD or "xTJwoOFjOQG",
+            "devid": SCREENSCRAPER_DEV_ID or "",
+            "devpassword": SCREENSCRAPER_DEV_PASSWORD or "",
             "output": "json",
             "softname": "romm",
             "ssid": SCREENSCRAPER_USER or "",
