@@ -165,7 +165,7 @@ onMounted(() => reroll({ notify: false }));
 </script>
 
 <template>
-  <WidgetCard :title="t('home.widget-random-pick')" :loading="loading">
+  <WidgetCard title="SÉLECTION ALÉATOIRE" width="340px" :loading="loading">
     <template #action>
       <RBtn
         ref="rerollBtn"

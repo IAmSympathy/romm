@@ -49,7 +49,8 @@ const slots = useSlots();
      content (16 padding + 14 title + 8 gap + 70 cover + 16 padding
      = 124, rounded up so loading/loaded states match without a
      post-load pop). */
-  height: 128px;
+  min-height: 128px;
+  height: auto;
   background: var(--r-color-bg-elevated);
   border: 1px solid var(--r-color-border);
   border-radius: var(--r-radius-lg);

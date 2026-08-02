@@ -1,0 +1,64 @@
+volumes:
+    mysql_data:
+    romm_resources:
+    romm_redis_data:
+
+services:
+    romm:
+        image: rommapp/romm:5.1.1-beta.1
+        container_name: romm
+        restart: unless-stopped
+        environment:
+            - DB_HOST=romm-db
+            - DB_NAME=romm # Should match MARIADB_DATABASE in mariadb
+            - DB_USER=romm-user # Should match MARIADB_USER in mariadb
+            - DB_PASSWD=0HstfrcGJEeSvU # Should match MARIADB_PASSWORD in mariadb
+            - ROMM_AUTH_SECRET_KEY=fd3b1de02d3187a59bf84208201a682dde08b0ec5402b48c765176c88e546901 # Generate a key with \openssl rand -hex 32\
+            - SCREENSCRAPER_USER=IAmSympathy # These are the recommended metadata providers
+            - SCREENSCRAPER_PASSWORD=zV2mnf3T7dzeY6 # https://docs.romm.app/latest/getting-started/metadata-providers/#screenscraper
+            - RETROACHIEVEMENTS_API_KEY=sZQYtw9EHeyMGgP4OVYoHW8ihDfgbxWu # https://docs.romm.app/latest/getting-started/metadata-providers/#retroachievements
+            - STEAMGRIDDB_API_KEY=4f700a46bc17674e50042cf78f8f97b6 # https://docs.romm.app/latest/getting-started/metadata-providers/#steamgriddb
+            - HASHEOUS_API_ENABLED=true # https://docs.romm.app/latest/getting-started/metadata-providers/#hasheous
+            - IGDB_CLIENT_ID=aq78g3jv6tm3jk28r0j32ue6db38du
+            - IGDB_CLIENT_SECRET=bm53ffvuggbzey0mi5u8vzctfw4nh3
+            - HLTB_API_ENABLED=true
+            - FLASHPOINT_API_ENABLED=true
+            - ENABLE_SCHEDULED_CONVERT_IMAGES_TO_WEBP=true
+        volumes:
+            - romm_resources:/romm/resources # Resources fetched from IGDB (covers, screenshots, etc.)
+            - romm_redis_data:/redis-data # Cached data for background tasks
+            - /path/to/library:/romm/library # Your game library. Check https://github.com/rommapp/romm?tab=readme-ov-file#folder-structure for more details.
+            - /path/to/assets:/romm/assets # Uploaded saves, states, etc.
+            - /path/to/config:/romm/config # Path where config.yml is stored
+            - /home/ubuntu/romm-patch/assets/index.html:/var/www/html/index.html
+            - /home/ubuntu/romm-patch/assets/arcade-audiofix.js:/var/www/html/arcade-audiofix.js
+            - /home/ubuntu/romm-patch/assets/romm-custom-ui.js:/var/www/html/romm-custom-ui.js
+        ports:
+            - 8081:8080
+        labels:
+            - tnss.category=principal
+        depends_on:
+            romm-db:
+                condition: service_healthy
+                restart: true
+
+    romm-db:
+        image: mariadb:latest
+        container_name: romm-db
+        restart: unless-stopped
+        environment:
+            - MARIADB_ROOT_PASSWORD=0B8MxJxz3am0yW
+            - MARIADB_DATABASE=romm
+            - MARIADB_USER=romm-user
+            - MARIADB_PASSWORD=0HstfrcGJEeSvU
+        volumes:
+            - mysql_data:/var/lib/mysql
+        labels:
+            - tnss.category=other
+        healthcheck:
+            test: [CMD, healthcheck.sh, --connect, --innodb_initialized]
+            start_period: 30s
+            start_interval: 10s
+            interval: 10s
+            timeout: 5s
+            retries: 5
