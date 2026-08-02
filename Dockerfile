@@ -69,8 +69,8 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.2 /uv /uvx /usr/local/bin/
 # Install Python
 RUN uv python install 3.13
 
-# Copy project files (including pyproject.toml and uv.lock)
-COPY pyproject.toml uv.lock* .python-version /app/
+# Copy full project source
+COPY . /app/
 
 # Install Python dependencies
 RUN uv sync --all-extras
