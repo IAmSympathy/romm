@@ -196,7 +196,7 @@ async def add_state(
                     db_screenshot.id,
                     {
                         "file_name": sanitized_screenshot_filename,
-                        "file_name_no_ext": f"{rom.name} (Public Highscore)",
+                        "file_name_no_ext": scanned_screenshot.file_name_no_ext,
                         "file_size_bytes": scanned_screenshot.file_size_bytes,
                         "user_id": request.user.id,
                         "is_public": True,
@@ -210,7 +210,7 @@ async def add_state(
                 scanned_screenshot.user_id = request.user.id
                 scanned_screenshot.is_public = True
                 scanned_screenshot.file_name = sanitized_screenshot_filename
-                scanned_screenshot.file_name_no_ext = f"{rom.name} (Public Highscore)"
+                scanned_screenshot.file_name_no_ext = scanned_screenshot.file_name_no_ext
                 db_screenshot = db_screenshot_handler.add_screenshot(
                     screenshot=scanned_screenshot
                 )

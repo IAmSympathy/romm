@@ -24,7 +24,7 @@ class DBScreenshotsHandler(DBBaseHandler):
     ) -> QueryT:
         query = query.filter(
             Screenshot.rom_id == rom_id,
-            Screenshot.user_id == user_id,
+            or_(Screenshot.user_id == user_id, Screenshot.is_public),
         )
 
         if filenames:

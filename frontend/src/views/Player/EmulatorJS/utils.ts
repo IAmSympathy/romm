@@ -71,7 +71,7 @@ export function initEmulatorJSPopupObserver() {
 
   const observer = new MutationObserver(() => {
     const popups = container.querySelectorAll<HTMLElement>(
-      ".ejs_popup_container, .ejs_popup_container_box, .ejs_control_container, .ejs_cheat_parent"
+      ".ejs_popup_container, .ejs_popup_container_box, .ejs_cheat_parent"
     );
 
     popups.forEach((popup) => {
@@ -100,8 +100,15 @@ export function initEmulatorJSPopupObserver() {
         closeBtn.onclick = (e) => {
           e.preventDefault();
           e.stopPropagation();
-          popup.style.display = "none";
-          popup.setAttribute("hidden", "true");
+
+          const nativeCloseBtn = popup.querySelector<HTMLElement>(
+            "a.ejs_close_icon, button.ejs_close_btn, a.ejs_subpopup_close_btn, button.ejs_subpopup_close_btn"
+          );
+          if (nativeCloseBtn) {
+            nativeCloseBtn.click();
+          } else {
+            popup.style.display = "none";
+          }
         };
         popup.appendChild(closeBtn);
       }
