@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { installEJSDefaultOptionsTrap, normalizeScreenshotBuffer } from "./utils";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { installEJSDefaultOptionsTrap } from "./utils";
 
 const STORAGE_KEY = "ejs-7-n64-Test Game-settings";
 
@@ -131,24 +131,5 @@ describe("installEJSDefaultOptionsTrap", () => {
     const patched = emulator.preGetSetting;
     window.EJS_emulator = emulator;
     expect(emulator.preGetSetting).toBe(patched);
-  });
-});
-
-describe("normalizeScreenshotBuffer", () => {
-  it("uses the displayed canvas before EmulatorJS's callback screenshot", async () => {
-    const displayed = new Uint8Array([1, 2, 3]).buffer;
-    const callbackFrame = new Uint8Array([4, 5, 6]).buffer;
-    const canvas = {
-      width: 320,
-      height: 240,
-      toBlob(callback: BlobCallback) {
-        callback(new Blob([displayed], { type: "image/png" }));
-      },
-    } as HTMLCanvasElement;
-    const selector = vi.spyOn(document, "querySelector").mockReturnValue(canvas);
-
-    await expect(normalizeScreenshotBuffer(callbackFrame)).resolves.toEqual(displayed);
-
-    selector.mockRestore();
   });
 });

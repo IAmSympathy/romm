@@ -92,14 +92,14 @@ class ActivityHandler:
         except ValueError:
             return None
 
-    ONLINE_TTL = 90  # seconds
+    ONLINE_TTL = 60  # seconds
     ONLINE_KEY_PREFIX = "activity:online:"
 
     def _online_key(self, user_id: int) -> str:
         return f"{self.ONLINE_KEY_PREFIX}{user_id}"
 
     async def set_online(self, user_id: int, username: str, avatar_path: str) -> None:
-        """Store or refresh a browser-presence heartbeat."""
+        """Store or refresh an online user's presence."""
         key = self._online_key(user_id)
         entry: ActivityEntry = {
             "user_id": user_id,

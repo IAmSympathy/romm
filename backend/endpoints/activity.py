@@ -55,21 +55,6 @@ async def get_rom_activity(request: Request, rom_id: int) -> list[ActivityEntryS
     return _visible_activity(request, entries)
 
 
-@protected_route(
-    router.post,
-    "/presence",
-    [Scope.ROMS_READ],
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-async def refresh_web_presence(request: Request) -> None:
-    """Refresh the authenticated browser's online presence."""
-    await activity_handler.set_online(
-        request.user.id,
-        request.user.username,
-        request.user.avatar_path or "",
-    )
-
-
 @protected_route(router.post, "/heartbeat", [Scope.ROMS_USER_WRITE])
 async def device_heartbeat(
     request: Request, payload: DeviceHeartbeatPayload

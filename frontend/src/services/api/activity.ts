@@ -31,10 +31,6 @@ async function getRomActivity(romId: number) {
   return api.get<ActivityEntry[]>(`/activity/rom/${romId}`);
 }
 
-async function refreshWebPresence() {
-  return api.post("/activity/presence");
-}
-
 async function sendDeviceHeartbeat(romId: number, deviceId: string) {
   return api.post<ActivityEntry>("/activity/heartbeat", {
     rom_id: romId,
@@ -51,7 +47,6 @@ async function clearDeviceActivity(deviceId: string) {
 export default {
   getAllActivity,
   getRomActivity,
-  refreshWebPresence,
   sendDeviceHeartbeat,
   clearDeviceActivity,
 };

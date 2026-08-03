@@ -24,7 +24,6 @@ from exceptions.auth_exceptions import (
     UserDisabledException,
 )
 from handler.auth import auth_handler, oauth_handler, oidc_handler
-from handler.activity_handler import activity_handler
 from handler.database import db_user_handler
 from logger.formatter import CYAN
 from logger.formatter import highlight as hl
@@ -87,11 +86,6 @@ async def logout(request: Request) -> Optional[OIDCLogoutResponse]:
     """
 
     id_token = request.session.get("oidc_id_token")
-    username = request.session.get("sub")
-    if username:
-        user = db_user_handler.get_user_by_username(username)
-        if user:
-            await activity_handler.clear_online(user.id)
     request.session.clear()
 
     if OIDC_RP_INITIATED_LOGOUT and id_token:

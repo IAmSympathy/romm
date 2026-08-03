@@ -476,28 +476,6 @@ class SimpleRomSchema(RomSchema):
         return cls.model_validate(db_rom)
 
 
-class RandomRomSchema(BaseModel):
-    """The compact response used by the home random-picker widget."""
-
-    id: int
-    name: str | None
-    fs_name: str
-    platform_slug: str
-    platform_display_name: str
-    cover_url: str
-
-    @classmethod
-    def from_rom(cls, db_rom: Rom) -> RandomRomSchema:
-        return cls(
-            id=db_rom.id,
-            name=db_rom.name,
-            fs_name=db_rom.fs_name,
-            platform_slug=db_rom.platform_slug,
-            platform_display_name=db_rom.platform_display_name,
-            cover_url=f"/api/roms/{db_rom.id}/cover",
-        )
-
-
 class UserCollectionSchema(BaseModel):
     id: int
     name: str

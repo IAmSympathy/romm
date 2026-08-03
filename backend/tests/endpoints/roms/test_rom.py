@@ -70,30 +70,6 @@ def test_get_rom_simple_missing_returns_404(client: TestClient, access_token: st
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
-def test_get_random_rom_returns_compact_visible_rom(
-    client: TestClient, access_token: str, rom: Rom
-):
-    response = client.get(
-        "/api/roms/random",
-        headers={"Authorization": f"Bearer {access_token}"},
-    )
-
-    assert response.status_code == status.HTTP_200_OK
-    body = response.json()
-    assert body["id"] == rom.id
-    assert body["name"] == rom.name
-    assert body["fs_name"] == rom.fs_name
-    assert body["cover_url"] == f"/api/roms/{rom.id}/cover"
-    assert set(body) == {
-        "id",
-        "name",
-        "fs_name",
-        "platform_slug",
-        "platform_display_name",
-        "cover_url",
-    }
-
-
 def _user_collections_by_name(body: dict) -> dict:
     return {c["name"]: c for c in body["user_collections"]}
 

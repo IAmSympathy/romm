@@ -35,7 +35,6 @@ import { installGalleryProvenance } from "@/v2/composables/useGalleryProvenance"
 import { useGamepad } from "@/v2/composables/useGamepad";
 import { useGlobalHotkeys } from "@/v2/composables/useGlobalHotkeys";
 import { useInputModality } from "@/v2/composables/useInputModality";
-import { useOnlinePresence } from "@/v2/composables/useOnlinePresence";
 import { prefetchPlatformIcons } from "@/v2/composables/usePlatformIconCache";
 import { useReducedMotion } from "@/v2/composables/useReducedMotion";
 import { installScanLifecycle } from "@/v2/composables/useScanLifecycle";
@@ -117,7 +116,6 @@ const { install: installInputModality } = useInputModality();
 const { install: installGamepad } = useGamepad();
 const { install: installGlobalHotkeys } = useGlobalHotkeys();
 const router = useRouter();
-useOnlinePresence();
 
 let removeBackMorph: (() => void) | null = null;
 let removeGalleryProvenance: (() => void) | null = null;

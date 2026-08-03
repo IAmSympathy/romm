@@ -6,13 +6,13 @@
 // navigating. Two API calls per pick: one to learn the library total,
 // one to fetch the selected offset; same approach the v1 RandomBtn
 // uses. The pick is intentionally not cached so each mount re-shuffles.
-import { RBtn } from "@v2/lib";
+import { RBtn, RChip } from "@v2/lib";
 import { computed, nextTick, onMounted, ref } from "vue";
 import type { ComponentPublicInstance } from "vue";
 import { useI18n } from "vue-i18n";
-import router, { ROUTES } from "@/plugins/router";
+import { ROUTES } from "@/plugins/router";
 import romApi from "@/services/api/rom";
-import type { RandomRom } from "@/services/api/rom";
+import type { SimpleRom } from "@/stores/roms";
 import CachedPlatformIcon from "@/v2/components/shared/CachedPlatformIcon.vue";
 import GameCover from "@/v2/components/shared/GameCover.vue";
 import { useSnackbar } from "@/v2/composables/useSnackbar";
@@ -35,7 +35,17 @@ const DICE_FACES = [
   "mdi-dice-6-outline",
 ];
 
-const pick = ref<RandomRom | null>(null);
+// A pick needs a single row, so it opts out of the char index, filter
+// values and rom id index the endpoint returns by default: each of them
+// spans the whole library and dwarfs the row itself.
+const PICK_QUERY = {
+  limit: 1,
+  withCharIndex: false,
+  withFilterValues: false,
+  withRomIdIndex: false,
+} as const;
+
+const pick = ref<SimpleRom | null>(null);
 const loading = ref(false);
 const failed = ref(false);
 const isSpinning = ref(false);
@@ -49,6 +59,15 @@ function rerollEl(): HTMLElement | null {
 
 const title = computed(() => pick.value?.name || pick.value?.fs_name || "");
 
+const releaseYear = computed(() => {
+  const ts = pick.value?.metadatum?.first_release_date;
+  if (!ts) return null;
+  const date = new Date(Number(ts));
+  return Number.isNaN(date.getTime()) ? null : date.getFullYear();
+});
+
+const region = computed(() => pick.value?.regions?.[0] ?? null);
+
 const placeholder = computed(() =>
   failed.value
     ? t("home.widget-random-pick-error")
@@ -60,22 +79,49 @@ function rollDiceFace() {
   diceFace.value = others[Math.floor(Math.random() * others.length)];
 }
 
-async function pickOnce(): Promise<RandomRom> {
-  const { data } = await romApi.getRandomRom();
-  return data;
+let globalLibraryTotal: number | null = null;
+const totalRoms = ref<number | null>(globalLibraryTotal);
+
+// One attempt at a pick. `null` means the library holds no roms;
+// `undefined` means the offset came back empty, which the backend's
+// cached id index makes possible when it drifts from the database
+// between the two calls (a scan, a deletion).
+async function pickOnce(): Promise<SimpleRom | null | undefined> {
+  if (totalRoms.value === null) {
+    if (globalLibraryTotal !== null) {
+      totalRoms.value = globalLibraryTotal;
+    } else {
+      const { data: head } = await romApi.getRoms({
+        ...PICK_QUERY,
+        offset: 0,
+        withTotal: true,
+      });
+      if (!head.total) return null;
+      totalRoms.value = head.total;
+      globalLibraryTotal = head.total;
+    }
+  }
+
+  const { data: result } = await romApi.getRoms({
+    ...PICK_QUERY,
+    withTotal: false,
+    offset: Math.floor(Math.random() * totalRoms.value),
+  });
+  const rom = result.items.at(0);
+  if (rom) {
+    const coverUrl = rom.cover_url || (rom as any)?.metadatum?.cover_url;
+    if (coverUrl) {
+      // Non-blocking image preload (fire and forget) so rerolls remain instant
+      const img = new Image();
+      img.src = coverUrl;
+    }
+  }
+  return rom;
 }
 
 const isInitialLoading = ref(true);
 
-async function reroll({
-  notify,
-  navigate,
-}: {
-  notify: boolean;
-  navigate: boolean;
-}) {
-  if (loading.value) return;
-  loading.value = true;
+async function reroll({ notify }: { notify: boolean }) {
   rollDiceFace();
   const hadFocus = document.activeElement === rerollEl();
   
@@ -85,7 +131,14 @@ async function reroll({
   }, 400);
 
   try {
-    pick.value = await pickOnce();
+    let rom = await pickOnce();
+    if (rom === undefined) {
+      totalRoms.value = null;
+      globalLibraryTotal = null;
+      rom = await pickOnce();
+    }
+    if (rom === undefined) throw new Error("random pick came back empty");
+    pick.value = rom;
     failed.value = false;
 
     isBouncing.value = false;
@@ -94,9 +147,6 @@ async function reroll({
     setTimeout(() => {
       isBouncing.value = false;
     }, 500);
-    if (navigate) {
-      await router.push({ name: ROUTES.ROM, params: { rom: pick.value.id } });
-    }
 
   } catch {
     failed.value = true;
@@ -112,11 +162,11 @@ async function reroll({
 }
 
 function onReroll() {
-  void reroll({ notify: true, navigate: true });
+  void reroll({ notify: true });
 }
 
 // The first pick is ours, not the user's
-onMounted(() => reroll({ notify: false, navigate: false }));
+onMounted(() => reroll({ notify: false }));
 </script>
 
 <template>
@@ -142,9 +192,9 @@ onMounted(() => reroll({ notify: false, navigate: false }));
       :to="{ name: ROUTES.ROM, params: { rom: pick.id } }"
     >
       <GameCover
-        :rom="null"
+        :rom="pick"
         :title="title"
-        :cover-src="pick.cover_url"
+        :identified="pick.is_identified"
         class="r-v2-widget-pick__cover"
       />
       <div class="r-v2-widget-pick__info">
@@ -158,6 +208,14 @@ onMounted(() => reroll({ notify: false, navigate: false }));
           <span class="r-v2-widget-pick__platform-name">
             {{ pick.platform_display_name }}
           </span>
+        </div>
+        <!-- Year + region disambiguate the pick when a library holds
+             several variations of the same title. -->
+        <div v-if="releaseYear || region" class="r-v2-widget-pick__meta">
+          <span v-if="releaseYear">{{ releaseYear }}</span>
+          <RChip v-if="region" size="x-small" variant="translucent">
+            {{ region }}
+          </RChip>
         </div>
       </div>
     </router-link>
