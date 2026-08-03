@@ -48,16 +48,34 @@ export class RetroAchievementsRuntime {
   }
 
   /**
-   * Load and parse achievements list, strictly deduplicating any duplicate achievement IDs.
+   * Load and parse achievements list, strictly deduplicating by ID, trigger string, and title.
    */
   public loadAchievements(rawAchievements: any[]) {
     this.achievements = [];
     const seenIds = new Set<number>();
+    const seenTriggers = new Set<string>();
 
     for (const raw of rawAchievements) {
       const ach = this.parseAchievement(raw);
+
+      // Skip invalid or unparsed achievements
+      if (!ach.id || !ach.triggerStr) continue;
+
+      // Deduplicate by ID
       if (seenIds.has(ach.id)) continue;
+
+      // Deduplicate logical duplicate triggers & copies (e.g. "I'm A Super Star! (copy)")
+      const cleanTitle = ach.title.toLowerCase().replace(/\(copy\)/g, "").trim();
+      const normKey = `${cleanTitle}:${ach.triggerStr}`;
+
+      if (seenTriggers.has(normKey) || seenTriggers.has(ach.triggerStr)) {
+        console.log(`[RA Runtime] Deduplicated copy/duplicate achievement "${ach.title}" (ID: ${ach.id})`);
+        continue;
+      }
+
       seenIds.add(ach.id);
+      seenTriggers.add(normKey);
+      seenTriggers.add(ach.triggerStr);
       this.achievements.push(ach);
     }
   }
@@ -202,14 +220,27 @@ export class RetroAchievementsRuntime {
     for (const ach of activeList) {
       if (!ach.trigger) continue;
 
-      const evalResult = RCheevosEngine.evaluateTrigger(ach.trigger, this.memoryReader);
+      const evalRes = RCheevosEngine.evaluateTriggerWithDebug(ach.trigger, this.memoryReader);
 
-      if (evalResult === RCTriggerState.RC_TRIGGER_STATE_TRIGGERED) {
-        console.group("%c[RA Achievement Evaluation — UNLOCK DETECTED]", "color: #22c55e; font-weight: bold; font-size: 14px;");
-        console.log("%cAchievement:", "font-weight: bold;", ach.title);
+      if (evalRes.state === RCTriggerState.RC_TRIGGER_STATE_TRIGGERED) {
+        console.group("%c[RA rcheevos Frame Evaluation — UNLOCK DETECTED]", "color: #22c55e; font-weight: bold; font-size: 14px;");
+        console.log("%cAchievement:", "font-weight: bold;", `${ach.title} (ID: ${ach.id})`);
         console.log("%cFrame:", "font-weight: bold;", this.frameIndex);
         console.log("%cTrigger:", "font-weight: bold;", ach.triggerStr);
-        console.log("%crcheevos State:", "font-weight: bold;", "RC_TRIGGER_STATE_TRIGGERED");
+        console.log("%cState Transition:", "font-weight: bold;", `${evalRes.frameDebug.triggerStateBefore} -> ${evalRes.frameDebug.triggerStateAfter}`);
+
+        console.group("%cCondSets Breakdown:", "color: #eab308; font-weight: bold;");
+        evalRes.frameDebug.groups.forEach((group) => {
+          console.group(`CondSet [${group.groupName}] — Status: ${group.passed ? "PASSED" : group.isPaused ? "PAUSED" : group.wasReset ? "RESET" : "FAILED"}`);
+          group.conditions.forEach((c) => {
+            console.log(
+              `  Cond #${c.index} [${c.type}] | Addr: ${c.leftAddr} | Val: ${c.leftVal} ${c.op} Expected: ${c.rightVal} | Hits: ${c.hitsBefore} -> ${c.hitsAfter}/${c.requiredHits} => ${c.finalPass ? "PASS" : "FAIL"}`
+            );
+          });
+          console.groupEnd();
+        });
+        console.groupEnd();
+
         console.log("%cAction:", "font-weight: bold;", "Unlocking achievement now!");
         console.groupEnd();
 

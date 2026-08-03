@@ -14,14 +14,39 @@ import {
   type RCTrigger,
 } from "./RCheevosTypes";
 
+export interface RCheevosCondDebug {
+  index: number;
+  type: string;
+  op: string;
+  leftAddr: string;
+  leftVal: number;
+  rightVal: number;
+  hitsBefore: number;
+  hitsAfter: number;
+  requiredHits: number;
+  rawPass: boolean;
+  finalPass: boolean;
+}
+
+export interface RCheevosGroupDebug {
+  groupName: string;
+  isPaused: boolean;
+  wasReset: boolean;
+  passed: boolean;
+  conditions: RCheevosCondDebug[];
+}
+
+export interface RCheevosFrameDebug {
+  triggerStateBefore: string;
+  triggerStateAfter: string;
+  groups: RCheevosGroupDebug[];
+}
+
 /**
  * RCheevosEngine: Exact TypeScript port of official RetroAchievements rcheevos C evaluation engine
  * (operand.c, condition.c, condset.c, trigger.c, memref.c).
  */
 export class RCheevosEngine {
-  /**
-   * Register or reuse a memory reference in the trigger's memref registry.
-   */
   public static getOrCreateMemRef(
     memrefs: Map<number, RCMemRef>,
     address: number,
@@ -43,9 +68,6 @@ export class RCheevosEngine {
     return memref;
   }
 
-  /**
-   * Update memory references from RAM peek callback (mirroring memref.c rc_update_memref_values).
-   */
   public static updateMemRefValues(
     memrefs: Map<number, RCMemRef>,
     reader: RAMemoryReader
@@ -75,9 +97,6 @@ export class RCheevosEngine {
     }
   }
 
-  /**
-   * Parse operand string (mirroring operand.c rc_parse_operand).
-   */
   public static parseOperand(
     raw: string,
     memrefs: Map<number, RCMemRef>
@@ -132,7 +151,6 @@ export class RCheevosEngine {
       };
     }
 
-    // Constant value
     let num = 0;
     if (str.startsWith("0x") || str.startsWith("0X")) {
       num = parseInt(str, 16);
@@ -149,9 +167,6 @@ export class RCheevosEngine {
     };
   }
 
-  /**
-   * Evaluate operand (mirroring operand.c rc_evaluate_operand).
-   */
   public static evaluateOperand(operand: RCOperand): number {
     if (operand.type === RCOperandType.RC_OPERAND_CONST) {
       return operand.value.num;
@@ -187,9 +202,6 @@ export class RCheevosEngine {
     }
   }
 
-  /**
-   * Parse single condition clause (mirroring condition.c rc_parse_condition).
-   */
   public static parseCondition(
     clause: string,
     memrefs: Map<number, RCMemRef>
@@ -198,26 +210,38 @@ export class RCheevosEngine {
     if (!str) return null;
 
     let type: RCConditionType = RCConditionType.RC_CONDITION_STANDARD;
-    if (str.startsWith("R:")) { type = RCConditionType.RC_CONDITION_RESET_IF; str = str.substring(2); }
-    else if (str.startsWith("P:")) { type = RCConditionType.RC_CONDITION_PAUSE_IF; str = str.substring(2); }
-    else if (str.startsWith("A:")) { type = RCConditionType.RC_CONDITION_ADD_ADDRESS; str = str.substring(2); }
-    else if (str.startsWith("B:")) { type = RCConditionType.RC_CONDITION_SUB_SOURCE; str = str.substring(2); }
-    else if (str.startsWith("C:")) { type = RCConditionType.RC_CONDITION_ADD_SOURCE; str = str.substring(2); }
-    else if (str.startsWith("D:")) { type = RCConditionType.RC_CONDITION_SUB_ADDRESS; str = str.substring(2); }
-    else if (str.startsWith("N:")) { type = RCConditionType.RC_CONDITION_AND_NEXT; str = str.substring(2); }
-    else if (str.startsWith("O:")) { type = RCConditionType.RC_CONDITION_OR_NEXT; str = str.substring(2); }
-    else if (str.startsWith("I:")) { type = RCConditionType.RC_CONDITION_RESET_NEXT_IF; str = str.substring(2); }
-    else if (str.startsWith("M:")) { type = RCConditionType.RC_CONDITION_MEASURED; str = str.substring(2); }
-    else if (str.startsWith("Q:")) { type = RCConditionType.RC_CONDITION_MEASURED_IF; str = str.substring(2); }
-    else if (str.startsWith("Z:")) { type = RCConditionType.RC_CONDITION_TRIGGER; str = str.substring(2); }
-    else if (str.startsWith("G:")) { type = RCConditionType.RC_CONDITION_ADD_HITS; str = str.substring(2); }
-    else if (str.startsWith("H:")) { type = RCConditionType.RC_CONDITION_SUB_HITS; str = str.substring(2); }
+    if (str.length >= 2 && str.charAt(1) === ":") {
+      const prefix = str.charAt(0).toUpperCase();
+      switch (prefix) {
+        case "P": type = RCConditionType.RC_CONDITION_PAUSE_IF; break;
+        case "R": type = RCConditionType.RC_CONDITION_RESET_IF; break;
+        case "A": type = RCConditionType.RC_CONDITION_ADD_SOURCE; break;
+        case "B": type = RCConditionType.RC_CONDITION_SUB_SOURCE; break;
+        case "C": type = RCConditionType.RC_CONDITION_ADD_HITS; break;
+        case "D": type = RCConditionType.RC_CONDITION_SUB_HITS; break;
+        case "N": type = RCConditionType.RC_CONDITION_AND_NEXT; break;
+        case "O": type = RCConditionType.RC_CONDITION_OR_NEXT; break;
+        case "M": type = RCConditionType.RC_CONDITION_MEASURED; break;
+        case "Q": type = RCConditionType.RC_CONDITION_MEASURED_IF; break;
+        case "I": type = RCConditionType.RC_CONDITION_ADD_ADDRESS; break;
+        case "T": type = RCConditionType.RC_CONDITION_TRIGGER; break;
+        case "K": type = RCConditionType.RC_CONDITION_REMEMBER; break;
+        case "Z": type = RCConditionType.RC_CONDITION_RESET_NEXT_IF; break;
+        case "G": type = RCConditionType.RC_CONDITION_MEASURED; break;
+      }
+      str = str.substring(2);
+    }
 
     let requiredHits = 0;
-    const hitMatch = str.match(/\((\d+)\)$/);
-    if (hitMatch) {
-      requiredHits = parseInt(hitMatch[1], 10) || 0;
+    const parenHitMatch = str.match(/\((\d+)\)$/);
+    const dotHitMatch = str.match(/\.(\d+)\.$/);
+
+    if (parenHitMatch) {
+      requiredHits = parseInt(parenHitMatch[1], 10) || 0;
       str = str.replace(/\((\d+)\)$/, "").trim();
+    } else if (dotHitMatch) {
+      requiredHits = parseInt(dotHitMatch[1], 10) || 0;
+      str = str.replace(/\.(\d+)\.$/, "").trim();
     }
 
     const opMatch = str.match(/(!=|==|<=|>=|=|<|>)/);
@@ -257,9 +281,6 @@ export class RCheevosEngine {
     };
   }
 
-  /**
-   * Classify condition into rcheevos execution passes (mirroring condset.c rc_classify_condition).
-   */
   public static classifyCondition(cond: RCCondition): RCConditionClassification {
     switch (cond.type) {
       case RCConditionType.RC_CONDITION_PAUSE_IF:
@@ -288,9 +309,6 @@ export class RCheevosEngine {
     }
   }
 
-  /**
-   * Evaluate a single condition (mirroring condition.c rc_test_condition).
-   */
   public static testCondition(cond: RCCondition): boolean {
     const val1 = this.evaluateOperand(cond.operand1);
     const val2 = this.evaluateOperand(cond.operand2);
@@ -306,9 +324,6 @@ export class RCheevosEngine {
     }
   }
 
-  /**
-   * Parse condset (group) mirroring condset.c rc_parse_condset.
-   */
   public static parseCondSet(
     groupStr: string,
     memrefs: Map<number, RCMemRef>
@@ -362,14 +377,12 @@ export class RCheevosEngine {
     };
   }
 
-  /**
-   * Evaluate a condition set mirroring condset.c rc_test_condset.
-   */
   public static testCondSet(
     condset: RCCondSet,
     evalState: RCEvalState,
-    allCondSets: RCCondSet[]
-  ): boolean {
+    allCondSets: RCCondSet[],
+    groupName: string = "Core"
+  ): { pass: boolean; debug: RCheevosGroupDebug } {
     evalState.measuredValue.type = "NONE";
     evalState.addHits = 0;
     evalState.isTrue = true;
@@ -382,42 +395,93 @@ export class RCheevosEngine {
     evalState.resetNext = false;
     evalState.stopProcessing = false;
 
+    const condDebugs: RCheevosCondDebug[] = [];
+
     // 1. Evaluate PauseIf conditions
-    for (const cond of condset.conditions) {
+    for (let i = 0; i < condset.conditions.length; i++) {
+      const cond = condset.conditions[i];
       if (cond.type === RCConditionType.RC_CONDITION_PAUSE_IF) {
+        const hitsBefore = cond.currentHits;
         const condPass = this.testCondition(cond);
+        condDebugs.push({
+          index: i + 1,
+          type: "PauseIf",
+          op: RCOperator[cond.operator],
+          leftAddr: cond.operand1.type === RCOperandType.RC_OPERAND_CONST ? "const" : `0x${cond.operand1.value.num.toString(16).toUpperCase()}`,
+          leftVal: this.evaluateOperand(cond.operand1),
+          rightVal: this.evaluateOperand(cond.operand2),
+          hitsBefore,
+          hitsAfter: cond.currentHits,
+          requiredHits: cond.requiredHits,
+          rawPass: condPass,
+          finalPass: false,
+        });
+
         if (condPass) {
           evalState.isPaused = true;
           evalState.isTrue = false;
           evalState.isPrimed = false;
           condset.isPaused = true;
-          return false;
+          return {
+            pass: false,
+            debug: {
+              groupName,
+              isPaused: true,
+              wasReset: false,
+              passed: false,
+              conditions: condDebugs,
+            },
+          };
         }
       }
     }
 
     // 2. Evaluate ResetIf conditions
-    for (const cond of condset.conditions) {
+    for (let i = 0; i < condset.conditions.length; i++) {
+      const cond = condset.conditions[i];
       if (cond.type === RCConditionType.RC_CONDITION_RESET_IF) {
+        const hitsBefore = cond.currentHits;
         const condPass = this.testCondition(cond);
+        condDebugs.push({
+          index: i + 1,
+          type: "ResetIf",
+          op: RCOperator[cond.operator],
+          leftAddr: cond.operand1.type === RCOperandType.RC_OPERAND_CONST ? "const" : `0x${cond.operand1.value.num.toString(16).toUpperCase()}`,
+          leftVal: this.evaluateOperand(cond.operand1),
+          rightVal: this.evaluateOperand(cond.operand2),
+          hitsBefore,
+          hitsAfter: cond.currentHits,
+          requiredHits: cond.requiredHits,
+          rawPass: condPass,
+          finalPass: false,
+        });
+
         if (condPass) {
           cond.isTrue |= 0x02;
           evalState.isTrue = false;
           evalState.isPrimed = false;
           evalState.wasReset = true;
 
-          // Reset all hit counts across all condition sets
           for (const cs of allCondSets) {
             for (const c of cs.conditions) {
               c.currentHits = 0;
             }
           }
-          return false;
+          return {
+            pass: false,
+            debug: {
+              groupName,
+              isPaused: false,
+              wasReset: true,
+              passed: false,
+              conditions: condDebugs,
+            },
+          };
         }
       }
     }
 
-    // 3. Evaluate Requirement & Combining Conditions
+    // 3. Evaluate Requirement Conditions
     let hasRequirementCond = false;
 
     for (let i = 0; i < condset.conditions.length; i++) {
@@ -431,6 +495,7 @@ export class RCheevosEngine {
       }
 
       hasRequirementCond = true;
+      const hitsBefore = cond.currentHits;
       const rawPass = this.testCondition(cond);
 
       if (cond.requiredHits > 0) {
@@ -446,6 +511,20 @@ export class RCheevosEngine {
         condPass = rawPass;
       }
 
+      condDebugs.push({
+        index: i + 1,
+        type: RCConditionType[cond.type],
+        op: RCOperator[cond.operator],
+        leftAddr: cond.operand1.type === RCOperandType.RC_OPERAND_CONST ? "const" : `0x${cond.operand1.value.num.toString(16).toUpperCase()}`,
+        leftVal: this.evaluateOperand(cond.operand1),
+        rightVal: this.evaluateOperand(cond.operand2),
+        hitsBefore,
+        hitsAfter: cond.currentHits,
+        requiredHits: cond.requiredHits,
+        rawPass,
+        finalPass: condPass,
+      });
+
       if (!condPass) {
         evalState.isTrue = false;
         evalState.isPrimed = false;
@@ -456,12 +535,18 @@ export class RCheevosEngine {
       evalState.isTrue = false;
     }
 
-    return evalState.isTrue;
+    return {
+      pass: evalState.isTrue,
+      debug: {
+        groupName,
+        isPaused: false,
+        wasReset: false,
+        passed: evalState.isTrue,
+        conditions: condDebugs,
+      },
+    };
   }
 
-  /**
-   * Parse trigger string (mirroring trigger.c rc_parse_trigger).
-   */
   public static parseTrigger(triggerStr: string): RCTrigger {
     const memrefs = new Map<number, RCMemRef>();
     const altGroupStrings = triggerStr.split(/S|\|/);
@@ -491,21 +576,26 @@ export class RCheevosEngine {
     };
   }
 
-  /**
-   * Evaluate trigger (mirroring trigger.c rc_evaluate_trigger).
-   */
-  public static evaluateTrigger(
+  public static evaluateTriggerWithDebug(
     trigger: RCTrigger,
     reader: RAMemoryReader
-  ): RCTriggerState {
+  ): { state: RCTriggerState; frameDebug: RCheevosFrameDebug } {
+    const stateBefore = RCTriggerState[trigger.state];
+
     if (
       trigger.state === RCTriggerState.RC_TRIGGER_STATE_TRIGGERED ||
       trigger.state === RCTriggerState.RC_TRIGGER_STATE_DISABLED
     ) {
-      return RCTriggerState.RC_TRIGGER_STATE_INACTIVE;
+      return {
+        state: RCTriggerState.RC_TRIGGER_STATE_INACTIVE,
+        frameDebug: {
+          triggerStateBefore: stateBefore,
+          triggerStateAfter: "RC_TRIGGER_STATE_INACTIVE",
+          groups: [],
+        },
+      };
     }
 
-    // Update memory references first
     this.updateMemRefValues(trigger.memrefs, reader);
 
     const evalState: RCEvalState = {
@@ -529,21 +619,28 @@ export class RCheevosEngine {
     if (trigger.requirement) allCondSets.push(trigger.requirement);
     if (trigger.alternative) allCondSets.push(...trigger.alternative);
 
+    const groupsDebug: RCheevosGroupDebug[] = [];
     let ret = 1;
+
     if (trigger.requirement) {
-      ret = this.testCondSet(trigger.requirement, evalState, allCondSets) ? 1 : 0;
+      const coreRes = this.testCondSet(trigger.requirement, evalState, allCondSets, "Core");
+      groupsDebug.push(coreRes.debug);
+      ret = coreRes.pass ? 1 : 0;
     }
 
     if (trigger.alternative && trigger.alternative.length > 0) {
       let sub = 0;
+      let idx = 1;
       for (const alt of trigger.alternative) {
-        sub |= this.testCondSet(alt, evalState, allCondSets) ? 1 : 0;
+        const altRes = this.testCondSet(alt, evalState, allCondSets, `Alt #${idx}`);
+        groupsDebug.push(altRes.debug);
+        sub |= altRes.pass ? 1 : 0;
+        idx++;
       }
       ret &= sub;
     }
 
     if (evalState.wasReset) {
-      // Reset hitcounts
       for (const cs of allCondSets) {
         for (const c of cs.conditions) {
           c.currentHits = 0;
@@ -551,19 +648,47 @@ export class RCheevosEngine {
       }
       if (trigger.hasHits) {
         trigger.hasHits = false;
-        return RCTriggerState.RC_TRIGGER_STATE_RESET;
+        return {
+          state: RCTriggerState.RC_TRIGGER_STATE_RESET,
+          frameDebug: {
+            triggerStateBefore: stateBefore,
+            triggerStateAfter: "RC_TRIGGER_STATE_RESET",
+            groups: groupsDebug,
+          },
+        };
       }
-      return RCTriggerState.RC_TRIGGER_STATE_ACTIVE;
+      return {
+        state: RCTriggerState.RC_TRIGGER_STATE_ACTIVE,
+        frameDebug: {
+          triggerStateBefore: stateBefore,
+          triggerStateAfter: "RC_TRIGGER_STATE_ACTIVE",
+          groups: groupsDebug,
+        },
+      };
     }
 
     if (ret) {
       if (trigger.state === RCTriggerState.RC_TRIGGER_STATE_WAITING) {
         this.resetTrigger(trigger);
-        return RCTriggerState.RC_TRIGGER_STATE_WAITING;
+        return {
+          state: RCTriggerState.RC_TRIGGER_STATE_WAITING,
+          frameDebug: {
+            triggerStateBefore: stateBefore,
+            triggerStateAfter: "RC_TRIGGER_STATE_WAITING",
+            groups: groupsDebug,
+          },
+        };
       }
 
       trigger.state = RCTriggerState.RC_TRIGGER_STATE_TRIGGERED;
-      return RCTriggerState.RC_TRIGGER_STATE_TRIGGERED;
+      return {
+        state: RCTriggerState.RC_TRIGGER_STATE_TRIGGERED,
+        frameDebug: {
+          triggerStateBefore: stateBefore,
+          triggerStateAfter: "RC_TRIGGER_STATE_TRIGGERED",
+          groups: groupsDebug,
+        },
+      };
     }
 
     if (evalState.isPaused) {
@@ -572,12 +697,23 @@ export class RCheevosEngine {
       trigger.state = RCTriggerState.RC_TRIGGER_STATE_ACTIVE;
     }
 
-    return trigger.state;
+    return {
+      state: trigger.state,
+      frameDebug: {
+        triggerStateBefore: stateBefore,
+        triggerStateAfter: RCTriggerState[trigger.state],
+        groups: groupsDebug,
+      },
+    };
   }
 
-  /**
-   * Reset trigger (mirroring trigger.c rc_reset_trigger).
-   */
+  public static evaluateTrigger(
+    trigger: RCTrigger,
+    reader: RAMemoryReader
+  ): RCTriggerState {
+    return this.evaluateTriggerWithDebug(trigger, reader).state;
+  }
+
   public static resetTrigger(trigger: RCTrigger): void {
     const allCondSets: RCCondSet[] = [];
     if (trigger.requirement) allCondSets.push(trigger.requirement);
