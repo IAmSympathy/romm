@@ -155,9 +155,12 @@ export class RetroAchievementsRuntime {
     const triggerStr = raw.MemAddr || raw.conditions || raw.trigger || "";
     let parsedTrigger: RCTrigger | null = null;
 
+    const achId = Number(raw.id || raw.ID);
+    const achTitle = raw.title || raw.Title || "Untitled";
+
     try {
       if (triggerStr) {
-        parsedTrigger = RCheevosEngine.parseTrigger(triggerStr);
+        parsedTrigger = RCheevosEngine.parseTrigger(triggerStr, { id: achId, title: achTitle });
       }
     } catch (err) {
       console.warn(`[RA Runtime] Failed to parse rcheevos trigger for achievement ${raw.id}:`, err);

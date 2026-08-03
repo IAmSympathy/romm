@@ -422,11 +422,12 @@ export class RCheevosEngine {
     const memref = operand.value.memref;
     if (!memref) return 0;
 
-    let val =
-      operand.type === RCOperandType.RC_OPERAND_DELTA ||
-      operand.type === RCOperandType.RC_OPERAND_PRIOR
-        ? memref.value.prior
-        : memref.value.value;
+    let val = memref.value.value;
+    if (operand.type === RCOperandType.RC_OPERAND_DELTA) {
+      val = memref.value.changed ? memref.value.prior : memref.value.value;
+    } else if (operand.type === RCOperandType.RC_OPERAND_PRIOR) {
+      val = memref.value.prior;
+    }
 
     switch (operand.size) {
       case RCMemSize.RC_MEMSIZE_LOW:
@@ -840,7 +841,6 @@ export class RCheevosEngine {
       ) {
         continue;
       }
-
       hasRequirementCond = true;
       const hitsBefore = cond.currentHits;
       const rawPass = this.testCondition(cond);
@@ -894,8 +894,13 @@ export class RCheevosEngine {
     };
   }
 
-  public static parseTrigger(triggerStr: string): RCTrigger {
-    console.group("%c[RA rcheevos Parse Trigger]", "color: #3b82f6; font-weight: bold; font-size: 13px;");
+  public static parseTrigger(triggerStr: string, meta?: { id?: number; title?: string }): RCTrigger {
+    const achLabel = meta?.id ? `Achievement #${meta.id}${meta.title ? `: "${meta.title}"` : ""}` : "";
+    console.group(`%c[RA rcheevos Parse Trigger] ${achLabel}`.trim(), "color: #3b82f6; font-weight: bold; font-size: 13px;");
+    if (meta?.id) {
+      console.log("%cAchievement ID:", "font-weight: bold;", meta.id);
+      console.log("%cTitle:", "font-weight: bold;", meta.title || "Untitled");
+    }
     console.log("%cRaw Trigger String:", "font-weight: bold; color: #a855f7;", triggerStr);
 
     const memrefs = new Map<number, RCMemRef>();
@@ -912,7 +917,7 @@ export class RCheevosEngine {
       }
     }
 
-    console.log("%cParsing Result:", "font-weight: bold; color: #22c55e;", {
+    console.log("%cParsing Result Summary:", "font-weight: bold; color: #22c55e;", {
       requirementConditions: requirement.conditions.length,
       altGroupCount: alternative.length,
       totalMemRefs: memrefs.size,
@@ -920,11 +925,50 @@ export class RCheevosEngine {
       totalLength: cursor.str.length,
     });
 
-    const memSummary: string[] = [];
-    for (const [addr, memref] of memrefs.entries()) {
-      memSummary.push(`0x${addr.toString(16).toUpperCase()} (${RCMemSize[memref.value.size]})`);
+    const formatOperand = (op: RCOperand) => {
+      if (op.type === RCOperandType.RC_OPERAND_CONST) {
+        return `CONST(${op.value.num})`;
+      }
+      if (op.type === RCOperandType.RC_OPERAND_FP) {
+        return `FP(${op.value.dbl ?? op.value.num})`;
+      }
+      const addrHex = `0x${op.value.num.toString(16).toUpperCase()}`;
+      const addrDec = op.value.num;
+      const typeName = RCOperandType[op.type] || `TYPE_${op.type}`;
+      const sizeName = RCMemSize[op.size] || `SIZE_${op.size}`;
+      return `${typeName}(Addr=${addrHex} / ${addrDec}, Size=${sizeName})`;
+    };
+
+    const logCondSet = (groupName: string, condset: RCCondSet) => {
+      console.group(`CondSet [${groupName}] (${condset.conditions.length} conditions)`);
+      condset.conditions.forEach((c, i) => {
+        const op1Str = formatOperand(c.operand1);
+        const op2Str = formatOperand(c.operand2);
+        const opName = RCOperator[c.operator] || `OP_${c.operator}`;
+        const typeName = RCConditionType[c.type] || `TYPE_${c.type}`;
+        console.log(`  Cond #${i + 1} [${typeName}] | ${op1Str} ${opName} ${op2Str} | Target Hits: ${c.requiredHits}`);
+      });
+      console.groupEnd();
+    };
+
+    if (requirement.conditions.length > 0) {
+      logCondSet("Core", requirement);
     }
-    console.log("%cMemrefs Registered:", "font-weight: bold;", memSummary);
+    alternative.forEach((alt, idx) => {
+      logCondSet(`Alt #${idx + 1}`, alt);
+    });
+
+    const memSummary: any[] = [];
+    for (const [addr, memref] of memrefs.entries()) {
+      memSummary.push({
+        addressHex: `0x${addr.toString(16).toUpperCase()}`,
+        addressDec: addr,
+        size: RCMemSize[memref.value.size],
+        currentVal: memref.value.value,
+        priorVal: memref.value.prior,
+      });
+    }
+    console.log("%cRegistered MemRefs:", "font-weight: bold;", memSummary);
     console.groupEnd();
 
     return {
@@ -1010,7 +1054,7 @@ export class RCheevosEngine {
         }
       }
       if (trigger.hasHits) {
-        trigger.hasHits = false;
+        trigger.hasHits = false as any;
         return {
           state: RCTriggerState.RC_TRIGGER_STATE_RESET,
           frameDebug: {
