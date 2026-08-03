@@ -267,6 +267,9 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
   public activeFnName: string = "";
   public parsedMemoryMap: RetroMemoryMap | null = null;
   public regions: MemoryRegion[] = [];
+  public hramReadCount: number = 0;
+  public hramUniqueAddresses: Set<number> = new Set();
+  public hramSampleValues: Map<number, number> = new Map();
 
   public isAvailable(): boolean {
     const emu = (window as any).EJS_emulator;
@@ -619,11 +622,22 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
       val = (val >> bit) & 1;
     }
 
-    const cpuAddrHex = `0x${targetAddr.toString(16).toUpperCase().padStart(4, "0")}`;
     if (targetAddr >= 0xff80 && targetAddr <= 0xfffe) {
-      console.log(`%c[RA HRAM Read Byte] CPU address ${cpuAddrHex} -> provider ID: ${provId} -> WASM ptr: 0x${ptr.toString(16).toUpperCase()} -> value: ${val}`, "color: #f59e0b; font-weight: bold;");
-    } else {
-      console.log(`[RA Read Byte] CPU address ${cpuAddrHex} -> provider ID: ${provId} -> WASM ptr: 0x${ptr.toString(16).toUpperCase()} -> offset: 0x${address.toString(16).toUpperCase()} (${address}) -> value: ${val}`);
+      this.hramReadCount++;
+      this.hramUniqueAddresses.add(targetAddr);
+      this.hramSampleValues.set(targetAddr, val);
+
+      if (this.hramReadCount % 5000 === 0) {
+        console.group(`%c[RA HRAM Stats - ${this.hramReadCount} Reads]`, "color: #f59e0b; font-weight: bold; font-size: 13px;");
+        console.log("%cTotal HRAM reads:", "font-weight: bold;", this.hramReadCount);
+        console.log("%cUnique HRAM addresses:", "font-weight: bold;", this.hramUniqueAddresses.size);
+        const examples: Record<string, number> = {};
+        for (const [addr, sampleVal] of this.hramSampleValues.entries()) {
+          examples[`0x${addr.toString(16).toUpperCase()}`] = sampleVal;
+        }
+        console.log("%cAddress samples:", "font-weight: bold;", examples);
+        console.groupEnd();
+      }
     }
 
     return val;
