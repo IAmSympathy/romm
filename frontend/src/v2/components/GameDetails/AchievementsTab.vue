@@ -64,19 +64,7 @@ const filtered = computed<RAGameRomAchievement[]>(() => {
 function badgeSrc(a: RAGameRomAchievement) {
   const path = isEarned(a) ? a.badge_path : a.badge_path_lock;
   if (path && props.apiBase) return `${props.apiBase}${path}`;
-  const rawUrl = (isEarned(a) ? a.badge_url : a.badge_url_lock) ?? "";
-  if (!rawUrl) return "";
-
-  const match = rawUrl.match(/Badge\/([^/]+)$/i);
-  if (match && match[1]) {
-    return `/api/users/ra/badge/${match[1]}`;
-  }
-  if (rawUrl.includes("media.retroachievements.org")) {
-    const parts = rawUrl.split("/");
-    return `/api/users/ra/badge/${parts[parts.length - 1]}`;
-  }
-
-  return rawUrl;
+  return (isEarned(a) ? a.badge_url : a.badge_url_lock) ?? "";
 }
 
 function toggleStatus(target: StatusFilter) {
@@ -198,11 +186,9 @@ function achievementTypeLabel(type: string | null | undefined): string {
               :src="badgeSrc(a)"
               :alt="a.title ?? ''"
               loading="lazy"
-              @error="(e: Event) => {
-                const target = e.target as HTMLImageElement;
-                target.onerror = null;
-                target.style.visibility = 'hidden';
-              }"
+              @error="
+                ($event.target as HTMLImageElement).style.visibility = 'hidden'
+              "
             />
           </div>
           <div class="r-v2-det-ach__text">
