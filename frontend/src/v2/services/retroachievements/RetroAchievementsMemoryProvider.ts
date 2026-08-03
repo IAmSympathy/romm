@@ -172,6 +172,37 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
       typeof asm?._get_memory_data === "function";
   }
 
+export function scanWasmHeapForMemoryMap(heap: Uint8Array): RetroMemoryMap | null {
+  try {
+    const view = new DataView(heap.buffer, heap.byteOffset, heap.byteLength);
+    const knownStarts = new Set([
+      0xc000, 0xd000, 0xe000, 0xff80, 0x0000, 0x7e0000, 0x7f0000,
+      0x02000000, 0x03000000, 0x80000000, 0xff0000
+    ]);
+
+    const maxSearch = Math.min(heap.length - 8, 4 * 1024 * 1024);
+    for (let ptr = 4; ptr < maxSearch; ptr += 4) {
+      const descriptorsPtr = view.getUint32(ptr, true);
+      const numDescriptors = view.getUint32(ptr + 4, true);
+
+      if (numDescriptors >= 1 && numDescriptors <= 32 && descriptorsPtr > 0 && descriptorsPtr < heap.length - 36) {
+        const descStart = view.getUint32(descriptorsPtr + 16, true);
+        const descLen = view.getUint32(descriptorsPtr + 28, true);
+        const descWasmPtr = view.getUint32(descriptorsPtr + 8, true);
+
+        if (knownStarts.has(descStart) && descLen > 0 && descLen <= 16777216 && descWasmPtr > 0 && descWasmPtr < heap.length) {
+          const mmap = parseWasmMemoryMap(ptr, heap);
+          if (mmap && mmap.descriptors.length === numDescriptors) {
+            console.log(`%c[RA WASM Heap Scanner] Found retro_memory_map at WASM address 0x${ptr.toString(16).toUpperCase()}`, "color: #10b981; font-weight: bold;");
+            return mmap;
+          }
+        }
+      }
+    }
+  } catch {}
+  return null;
+}
+
   public probeLibretroMemoryMap(): RetroMemoryMap | null {
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
@@ -211,6 +242,26 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
       this.parsedMemoryMap = parseWasmMemoryMap(mmapPtr, heap);
     }
 
+    if (!this.parsedMemoryMap) {
+      this.parsedMemoryMap = scanWasmHeapForMemoryMap(heap);
+    }
+
+    const fnToTest = mod.EmulatorJSGetMemoryData || asm.EmulatorJSGetMemoryData || mod._get_memory_data || asm._get_memory_data;
+    const fnSize = mod.EmulatorJSGetMemorySize || asm.EmulatorJSGetMemorySize || mod._get_memory_size || asm._get_memory_size || mod.retro_get_memory_size || asm.retro_get_memory_size;
+
+    const probedIntegerIds: { id: number; ptr: number; size: number }[] = [];
+    if (typeof fnToTest === "function") {
+      for (let id = 0; id <= 32; id++) {
+        try {
+          const ptr = fnToTest(id);
+          if (typeof ptr === "number" && ptr > 0 && ptr < heap.length) {
+            const sz = typeof fnSize === "function" ? (fnSize(id) || 0) : 0;
+            probedIntegerIds.push({ id, ptr, size: sz });
+          }
+        } catch {}
+      }
+    }
+
     console.group("%c[RA Libretro Memory Map Probe]", "color: #8b5cf6; font-weight: bold; font-size: 14px;");
     if (this.parsedMemoryMap && this.parsedMemoryMap.numDescriptors > 0) {
       console.log(`%cFound official retro_memory_map with ${this.parsedMemoryMap.numDescriptors} descriptor(s):`, "color: #22c55e; font-weight: bold;");
@@ -220,9 +271,16 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
         );
       });
     } else {
-      console.log("%cNo official retro_memory_map descriptor table exposed by WASM module exports.", "color: #f59e0b; font-weight: bold;");
+      console.log("%cNo official retro_memory_map descriptor table exposed by WASM module exports or WASM heap scan.", "color: #f59e0b; font-weight: bold;");
       console.log("Tested functions: EmulatorJSGetMemoryMap, _retro_get_memory_map, retro_get_memory_map, _get_memory_map");
       console.log("Tested symbols: retro_memory_map, _retro_memory_map");
+    }
+
+    if (probedIntegerIds.length > 0) {
+      console.log("%c[Probed Libretro Integer Memory IDs 0..32]:", "color: #06b6d4; font-weight: bold;");
+      probedIntegerIds.forEach((item) => {
+        console.log(`  ID ${item.id}: Pointer 0x${item.ptr.toString(16).toUpperCase()} | Size: ${item.size} bytes`);
+      });
     }
     console.groupEnd();
 

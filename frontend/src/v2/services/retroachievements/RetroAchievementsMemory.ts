@@ -103,19 +103,15 @@ export class RetroAchievementsMemory {
     if (core.includes("snes") || core.includes("bsnes")) return address & 0x1ffff;
     if (core.includes("sega") || core.includes("genesis") || core.includes("megadrive") || core.includes("picodrive")) return address & 0xffff;
     if (core.includes("gb") || core.includes("gambatte") || core.includes("sameboy") || core.includes("gearboy")) {
-      if (address >= 0xff80 && address <= 0xfffe) {
-        // HRAM (High RAM): 128 bytes placed right after 8KB WRAM (offset 0x2000 / 8192)
-        return 0x2000 + (address - 0xff80);
-      }
       if (address >= 0xe000 && address <= 0xfdff) {
         // Echo RAM (mirrors WRAM 0xC000)
         return address - 0xe000;
       }
       if (address >= 0xc000 && address <= 0xdfff) {
         // WRAM (0xC000 - 0xDFFF)
-        return address - 0xc000;
+        return address - 0xC000;
       }
-      return address & 0x1fff;
+      return address >= 0xc000 ? address - 0xc000 : address;
     }
     if (core.includes("gba") || core.includes("vba") || core.includes("mgba")) return address >= 0x02000000 ? (address - 0x02000000) & 0x3ffff : address & 0x3ffff;
     if (core.includes("n64") || core.includes("mupen64plus")) return address & 0x7fffff;
