@@ -81,15 +81,6 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
       "RETRO_MEMORY_SAVE_RAM",
       "RETRO_MEMORY_VIDEO_RAM",
       "RETRO_MEMORY_RTC",
-      "SYSTEM_RAM",
-      "SAVE_RAM",
-      "VIDEO_RAM",
-      "RTC",
-      "RAM",
-      "wram",
-      "vram",
-      "sram",
-      "hram",
     ];
 
     if (typeof fnToTest === "function") {

@@ -724,6 +724,176 @@ export class RCheevosEngine {
     };
   }
 
+  public static testCondSet(
+    condset: RCCondSet,
+    evalState: RCEvalState,
+    allCondSets: RCCondSet[],
+    groupName: string = "Core"
+  ): { pass: boolean; debug: RCheevosGroupDebug } {
+    evalState.measuredValue.type = "NONE";
+    evalState.addHits = 0;
+    evalState.isTrue = true;
+    evalState.isPrimed = true;
+    evalState.isPaused = false;
+    evalState.canMeasure = true;
+    evalState.measuredFromHits = false;
+    evalState.andNext = true;
+    evalState.orNext = false;
+    evalState.resetNext = false;
+    evalState.stopProcessing = false;
+
+    const condDebugs: RCheevosCondDebug[] = [];
+
+    // 1. Evaluate PauseIf conditions
+    for (let i = 0; i < condset.conditions.length; i++) {
+      const cond = condset.conditions[i];
+      if (cond.type === RCConditionType.RC_CONDITION_PAUSE_IF) {
+        const hitsBefore = cond.currentHits;
+        const condPass = this.testCondition(cond);
+        condDebugs.push({
+          index: i + 1,
+          type: "PauseIf",
+          op: RCOperator[cond.operator],
+          leftAddr: cond.operand1.type === RCOperandType.RC_OPERAND_CONST ? "const" : `0x${cond.operand1.value.num.toString(16).toUpperCase()}`,
+          leftVal: this.evaluateOperand(cond.operand1),
+          rightVal: this.evaluateOperand(cond.operand2),
+          hitsBefore,
+          hitsAfter: cond.currentHits,
+          requiredHits: cond.requiredHits,
+          rawPass: condPass,
+          finalPass: false,
+        });
+
+        if (condPass) {
+          evalState.isPaused = true;
+          evalState.isTrue = false;
+          evalState.isPrimed = false;
+          condset.isPaused = true;
+          return {
+            pass: false,
+            debug: {
+              groupName,
+              isPaused: true,
+              wasReset: false,
+              passed: false,
+              conditions: condDebugs,
+            },
+          };
+        }
+      }
+    }
+
+    // 2. Evaluate ResetIf conditions
+    for (let i = 0; i < condset.conditions.length; i++) {
+      const cond = condset.conditions[i];
+      if (cond.type === RCConditionType.RC_CONDITION_RESET_IF) {
+        const hitsBefore = cond.currentHits;
+        const condPass = this.testCondition(cond);
+        condDebugs.push({
+          index: i + 1,
+          type: "ResetIf",
+          op: RCOperator[cond.operator],
+          leftAddr: cond.operand1.type === RCOperandType.RC_OPERAND_CONST ? "const" : `0x${cond.operand1.value.num.toString(16).toUpperCase()}`,
+          leftVal: this.evaluateOperand(cond.operand1),
+          rightVal: this.evaluateOperand(cond.operand2),
+          hitsBefore,
+          hitsAfter: cond.currentHits,
+          requiredHits: cond.requiredHits,
+          rawPass: condPass,
+          finalPass: false,
+        });
+
+        if (condPass) {
+          cond.isTrue |= 0x02;
+          evalState.isTrue = false;
+          evalState.isPrimed = false;
+          evalState.wasReset = true;
+
+          for (const cs of allCondSets) {
+            for (const c of cs.conditions) {
+              c.currentHits = 0;
+            }
+          }
+          return {
+            pass: false,
+            debug: {
+              groupName,
+              isPaused: false,
+              wasReset: true,
+              passed: false,
+              conditions: condDebugs,
+            },
+          };
+        }
+      }
+    }
+
+    // 3. Evaluate Requirement Conditions
+    let hasRequirementCond = false;
+
+    for (let i = 0; i < condset.conditions.length; i++) {
+      const cond = condset.conditions[i];
+
+      if (
+        cond.type === RCConditionType.RC_CONDITION_PAUSE_IF ||
+        cond.type === RCConditionType.RC_CONDITION_RESET_IF
+      ) {
+        continue;
+      }
+
+      hasRequirementCond = true;
+      const hitsBefore = cond.currentHits;
+      const rawPass = this.testCondition(cond);
+
+      if (cond.requiredHits > 0) {
+        if (rawPass && cond.currentHits < cond.requiredHits) {
+          cond.currentHits++;
+        }
+      }
+
+      let condPass = false;
+      if (cond.requiredHits > 0) {
+        condPass = cond.currentHits >= cond.requiredHits;
+      } else {
+        condPass = rawPass;
+      }
+
+      condDebugs.push({
+        index: i + 1,
+        type: RCConditionType[cond.type],
+        op: RCOperator[cond.operator],
+        leftAddr: cond.operand1.type === RCOperandType.RC_OPERAND_CONST ? "const" : `0x${cond.operand1.value.num.toString(16).toUpperCase()}`,
+        leftVal: this.evaluateOperand(cond.operand1),
+        rightVal: this.evaluateOperand(cond.operand2),
+        hitsBefore,
+        hitsAfter: cond.currentHits,
+        requiredHits: cond.requiredHits,
+        rawPass,
+        finalPass: condPass,
+      });
+
+      if (!condPass) {
+        evalState.isTrue = false;
+        evalState.isPrimed = false;
+      }
+    }
+
+    if (!hasRequirementCond) {
+      evalState.isTrue = false;
+    }
+
+    return {
+      pass: evalState.isTrue,
+      debug: {
+        groupName,
+        isPaused: false,
+        wasReset: false,
+        passed: evalState.isTrue,
+        conditions: condDebugs,
+      },
+    };
+  }
+
   public static parseTrigger(triggerStr: string): RCTrigger {
     console.group("%c[RA rcheevos Parse Trigger]", "color: #3b82f6; font-weight: bold; font-size: 13px;");
     console.log("%cRaw Trigger String:", "font-weight: bold; color: #a855f7;", triggerStr);
