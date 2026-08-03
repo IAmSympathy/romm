@@ -19,56 +19,10 @@ defineProps<{
 
 const hoveredId = ref<number | null>(null);
 
-// Global diagnostic tracking & rate-limiting for images
-const failedImageUrls = ref(new Set<string>());
-const urlLoadCounts = new Map<string, number>();
-const urlLastRequestTimes = new Map<string, number>();
-
-function onImgLoad(item: MonitoredChallengeItem, e: Event) {
+function onImgError(e: Event) {
   const target = e.target as HTMLImageElement;
-  console.log("%c[RA IMAGE LOAD]", "color: #22c55e; font-weight: bold;", {
-    src: target.src,
-    timestamp: new Date().toISOString(),
-  });
-}
-
-function onImgError(item: MonitoredChallengeItem, e: Event) {
-  const target = e.target as HTMLImageElement;
-  const currentSrc = target.src || item.badgeUrl || "";
-  const now = Date.now();
-
-  // Rate limiting: max 1 attempt per second per URL
-  const lastTime = urlLastRequestTimes.get(currentSrc) || 0;
-  if (now - lastTime < 1000) {
-    console.warn(`[RA IMAGE RATE LIMIT] Request for "${currentSrc}" throttled (< 1s limit)`);
-    target.onerror = null;
-    target.style.display = "none";
-    return;
-  }
-  urlLastRequestTimes.set(currentSrc, now);
-
-  const attempts = (urlLoadCounts.get(currentSrc) || 0) + 1;
-  urlLoadCounts.set(currentSrc, attempts);
-
-  const alreadyFailed = failedImageUrls.value.has(currentSrc);
-  failedImageUrls.value.add(currentSrc);
-
-  console.warn("%c[RA IMAGE ERROR]", "color: #ef4444; font-weight: bold;", {
-    src: currentSrc,
-    attempts,
-    alreadyFailed,
-    fallbackAttempted: "/assets/scrappers/ra.png",
-  });
-
-  // HARD STOP: Disarm event listener immediately
   target.onerror = null;
-
-  if (currentSrc.includes("/assets/scrappers/ra.png")) {
-    // If fallback itself fails, hide img completely to guarantee no loop
-    target.style.display = "none";
-  } else {
-    target.src = "/assets/scrappers/ra.png";
-  }
+  target.src = "/assets/scrappers/ra.png";
 }
 </script>
 
@@ -84,12 +38,11 @@ function onImgError(item: MonitoredChallengeItem, e: Event) {
       >
         <div class="r-ra-challenge-badge-wrap">
           <img
-            v-if="item.badgeUrl && !failedImageUrls.has(item.badgeUrl)"
+            v-if="item.badgeUrl"
             :src="item.badgeUrl"
             class="r-ra-challenge-badge"
             alt=""
-            @load="onImgLoad(item, $event)"
-            @error="onImgError(item, $event)"
+            @error="onImgError"
           />
           <v-icon v-else color="#EAB308" size="24">mdi-trophy-award</v-icon>
         </div>
