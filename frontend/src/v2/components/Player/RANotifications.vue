@@ -32,6 +32,7 @@ function onDismiss(id: string) {
             :src="item.badgeUrl"
             class="r-ra-notif-card__badge"
             alt=""
+            @error="(e: Event) => ((e.target as HTMLImageElement).src = '/assets/romm/resources/metadata_providers/ra.png')"
           />
           <v-icon
             v-else-if="item.type === 'achievement_unlocked'"

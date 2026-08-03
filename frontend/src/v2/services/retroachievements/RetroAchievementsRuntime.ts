@@ -47,20 +47,26 @@ export class RetroAchievementsRuntime {
    * Format badge image URL to use backend proxy resolving browser CORS/CORP restrictions.
    */
   public formatBadgeUrl(rawBadgeUrl?: string): string {
-    if (!rawBadgeUrl) return "/assets/romm/resources/metadata_providers/ra.png";
+    const fallback = "/assets/romm/resources/metadata_providers/ra.png";
+    if (!rawBadgeUrl) {
+      console.log(`[RA Badge Proxy] Original: "${rawBadgeUrl}" | Converted: "${fallback}" | img.src: "${fallback}"`);
+      return fallback;
+    }
 
+    let badgeFilename = "";
     const match = rawBadgeUrl.match(/Badge\/([^/]+)$/i);
     if (match && match[1]) {
-      return `/api/users/ra/badge/${match[1]}`;
-    }
-
-    if (rawBadgeUrl.startsWith("http://") || rawBadgeUrl.startsWith("https://")) {
+      badgeFilename = match[1];
+    } else if (rawBadgeUrl.startsWith("http://") || rawBadgeUrl.startsWith("https://")) {
       const parts = rawBadgeUrl.split("/");
-      const filename = parts[parts.length - 1];
-      return `/api/users/ra/badge/${filename}`;
+      badgeFilename = parts[parts.length - 1];
+    } else {
+      badgeFilename = rawBadgeUrl.replace(/^\//, "");
     }
 
-    return rawBadgeUrl;
+    const converted = `/api/users/ra/badge/${badgeFilename}`;
+    console.log(`[RA Badge Proxy] Original: "${rawBadgeUrl}" | Converted: "${converted}" | img.src: "${converted}"`);
+    return converted;
   }
 
   /**

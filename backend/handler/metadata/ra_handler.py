@@ -253,30 +253,54 @@ class RAHandler(MetadataHandler):
     async def award_achievement(
         game_id: int, achievement_id: int, username: str, token: str, hardcore: bool = False
     ) -> dict[str, Any]:
-        """Send award achievement event to RetroAchievements."""
+        """Send award achievement event to RetroAchievements matching official rcheevos specification."""
+        import hashlib
+        import json
         import httpx
 
+        h_flag = "1" if hardcore else "0"
+        sig_raw = f"{achievement_id}{username}{h_flag}"
+        signature = hashlib.md5(sig_raw.encode("utf-8")).hexdigest()
+
         url = "https://retroachievements.org/dorequest.php"
-        params = {
+        data_payload = {
             "r": "awardachievement",
             "u": username,
             "t": token,
             "a": str(achievement_id),
-            "h": "1" if hardcore else "0",
+            "h": h_flag,
+            "v": signature,
         }
-        headers = {"User-Agent": "RetroArch/1.21.0 RomM/3.7.0"}
+        masked_payload = {**data_payload, "t": "***MASKED***"}
+        headers = {
+            "User-Agent": "RetroArch/1.21.0 RomM/3.7.0",
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+
+        log.info("[RA Backend Request] URL=%s Method=POST Payload=%s Headers=%s", url, masked_payload, headers)
+
         async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
             try:
-                res = await client.get(url, params=params)
+                res = await client.post(url, data=data_payload)
+                raw_body = res.text
+                log.info("[RA Backend Response] HTTP Status=%s Raw Body=%s", res.status_code, raw_body)
+
+                parsed_json = None
+                try:
+                    parsed_json = json.loads(raw_body)
+                except Exception:
+                    pass
+
                 if res.status_code != 200:
                     return {
                         "success": False,
                         "status": "AWARD_REJECTED",
                         "http_status": res.status_code,
-                        "error": f"HTTP error {res.status_code}",
-                        "response": None,
+                        "error": f"HTTP error {res.status_code}: {raw_body[:200]}",
+                        "response": parsed_json or raw_body,
                     }
-                data = res.json()
+
+                data = parsed_json or {}
                 if data.get("Success") is True:
                     return {
                         "success": True,
@@ -286,8 +310,9 @@ class RAHandler(MetadataHandler):
                         "achievement_id": achievement_id,
                         "response": data,
                     }
-                err_msg = data.get("Error", "Failed to award achievement")
-                is_already = "already" in err_msg.lower()
+
+                err_msg = data.get("Error", raw_body or "Failed to award achievement")
+                is_already = "already" in str(err_msg).lower()
                 return {
                     "success": False,
                     "status": "ALREADY_UNLOCKED" if is_already else "AWARD_REJECTED",
