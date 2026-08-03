@@ -151,6 +151,13 @@ async function getRetroAchievementsUnlocks(userId: number, gameId: number) {
   );
 }
 
+async function awardRetroAchievement(userId: number, gameId: number, achievementId: number) {
+  return api.post<{ success: boolean; score?: number; error?: string }>(
+    `/users/${userId}/ra/award`,
+    { game_id: gameId, achievement_id: achievementId },
+  );
+}
+
 export default {
   createUser,
   createInviteLink,
@@ -165,4 +172,5 @@ export default {
   getRetroAchievementsGameId,
   getRetroAchievementsPatch,
   getRetroAchievementsUnlocks,
+  awardRetroAchievement,
 };

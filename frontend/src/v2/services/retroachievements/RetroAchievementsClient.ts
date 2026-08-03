@@ -75,6 +75,7 @@ export class RetroAchievementsClient {
             points: Number(rawAch.Points || 0),
             badgeName,
             badgeUrl: badgeName ? `${MEDIA_HOST}/Badge/${badgeName}.png` : undefined,
+            trigger: rawAch.MemAddr || rawAch.Mem || rawAch.Conditions || "",
             unlocked: false,
           });
         }

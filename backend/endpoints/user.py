@@ -680,3 +680,31 @@ async def get_retro_achievements_unlocks(
         token=user.ra_token,
     )
 
+
+@protected_route(
+    router.post,
+    "/{id}/ra/award",
+    [Scope.ME_WRITE],
+    status_code=status.HTTP_200_OK,
+    summary="Award a RetroAchievement to user",
+)
+async def award_retro_achievement(
+    request: Request,
+    id: Annotated[int, PathVar(description="User internal id.", ge=1)],
+    achievement_id: Annotated[int, Body(embed=True)],
+    game_id: Annotated[int, Body(embed=True)],
+) -> dict[str, Any]:
+    """Submit an unlocked RetroAchievement for the user."""
+    user = db_user_handler.get_user(id)
+    if not user or not user.ra_username or not user.ra_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="RetroAchievements account not linked",
+        )
+    return await meta_ra_handler.award_achievement(
+        game_id=game_id,
+        achievement_id=achievement_id,
+        username=user.ra_username,
+        token=user.ra_token,
+    )
+

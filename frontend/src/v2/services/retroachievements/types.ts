@@ -10,6 +10,7 @@ export interface RAAchievement {
   points: number;
   badgeName: string;
   badgeUrl?: string;
+  trigger?: string;
   unlocked: boolean;
   unlockedHardcore?: boolean;
 }

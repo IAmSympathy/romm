@@ -1,5 +1,6 @@
 import { ref } from "vue";
 import { RetroAchievementsClient } from "./RetroAchievementsClient";
+import { raRuntime } from "./RetroAchievementsRuntime";
 import type {
   RACredentials,
   RANotificationItem,
@@ -180,17 +181,14 @@ export class RetroAchievementsManager {
     this.isInitialized.value = true;
 
     const totalCount = patch.achievements.length;
-    const gameTitle = patch.title || rom.name;
+    const gameTitle = patch.title || rom.name || rom.fs_name || "Game";
 
-    // Detailed Runtime Diagnostic Log
-    console.group("%c[RA Runtime Debug]", "color: #eab308; font-weight: bold; font-size: 14px;");
-    console.log("%cNombre d'achievements chargés :", "font-weight: bold;", totalCount);
-    console.log("%cNombre d'achievements surveillés :", "font-weight: bold;", 0, "(Aucune boucle d'évaluation active)");
-    console.log("%cFréquence de vérification :", "font-weight: bold;", "0 Hz (Absence de la boucle d'update)");
-    console.log("%cValeurs mémoire lues :", "font-weight: bold;", "Non connectées (Core RAM non transmise à l'évaluateur)");
-    console.log("%cRésultat des évaluations :", "font-weight: bold;", "Aucune évaluation exécutée pendant le jeu");
-    console.log("%cAppels d'unlock envoyés :", "font-weight: bold;", 0);
-    console.groupEnd();
+    // Initialize and start real-time RetroAchievementsRuntime
+    raRuntime.initialize(user.id, resolvedGameId, patch.achievements);
+    raRuntime.onUnlockCallback = (ach) => {
+      this.triggerUnlock(ach.id);
+    };
+    raRuntime.start();
 
     // Show game recognized notification
     this.addNotification(
@@ -229,6 +227,7 @@ export class RetroAchievementsManager {
   }
 
   public reset() {
+    raRuntime.stop();
     this.notifications.value = [];
     this.activePatch.value = null;
     this.gameId.value = null;

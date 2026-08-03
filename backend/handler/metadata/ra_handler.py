@@ -250,6 +250,42 @@ class RAHandler(MetadataHandler):
                 return {"success": False, "error": str(e)}
 
     @staticmethod
+    async def award_achievement(
+        game_id: int, achievement_id: int, username: str, token: str, hardcore: bool = False
+    ) -> dict[str, Any]:
+        """Send award achievement event to RetroAchievements."""
+        import httpx
+
+        url = "https://retroachievements.org/dorequest.php"
+        params = {
+            "r": "awardachievement",
+            "u": username,
+            "t": token,
+            "a": str(achievement_id),
+            "h": "1" if hardcore else "0",
+        }
+        headers = {"User-Agent": "RetroArch/1.21.0 RomM/3.7.0"}
+        async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
+            try:
+                res = await client.get(url, params=params)
+                if res.status_code != 200:
+                    return {"success": False, "error": f"HTTP error {res.status_code}"}
+                data = res.json()
+                if data.get("Success") is True:
+                    return {
+                        "success": True,
+                        "score": data.get("Score", 0),
+                        "achievement_id": achievement_id,
+                    }
+                return {
+                    "success": False,
+                    "error": data.get("Error", "Failed to award achievement"),
+                }
+            except Exception as e:
+                log.error("Failed to award RA achievement %s: %s", achievement_id, e)
+                return {"success": False, "error": str(e)}
+
+    @staticmethod
     def extract_ra_id_from_filename(fs_name: str) -> int | None:
         """Extract RetroAchievements ID from filename tag like (ra-12345)."""
         match = RA_TAG_REGEX.search(fs_name)
