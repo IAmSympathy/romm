@@ -798,10 +798,12 @@ const selectedAsset = computed<SaveSchema | StateSchema | null>(() =>
 
     <!-- Running state -->
     <div v-else-if="rom" class="r-v2-ejs__stage">
+      <Teleport :to="bezelHost" :disabled="!bezelHost">
       <RANotifications
         :notifications="raManager.notifications.value"
         @dismiss="raManager.dismissNotification"
       />
+      </Teleport>
       <Player
         :rom="rom"
         :state="selectedState"
