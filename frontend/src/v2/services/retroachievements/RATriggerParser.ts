@@ -24,6 +24,8 @@ export type RAConditionFlag =
   | "AndNext"
   | "OrNext"
   | "ResetNextIf"
+  | "AddHits"
+  | "SubHits"
   | "Measured"
   | "MeasuredIf"
   | "Trigger";
@@ -47,7 +49,7 @@ export interface RATrigger {
 }
 
 /**
- * RATriggerParser: Complete RetroAchievements trigger condition parser and evaluator (rcheevos standard).
+ * RATriggerParser: RetroAchievements trigger state machine compliant with official rcheevos standard.
  */
 export class RATriggerParser {
   /**
@@ -128,7 +130,7 @@ export class RATriggerParser {
   }
 
   /**
-   * Parse a single condition clause (e.g. 0xH075A=1, R:0xH0770=0, 0x075A!=0(3)).
+   * Parse a single condition clause (e.g. 0xH075A=1, R:0xH0770=0, P:0x075A!=0(3)).
    */
   public static parseCondition(clause: string): RACondition | null {
     let str = clause.trim();
@@ -147,6 +149,8 @@ export class RATriggerParser {
     else if (str.startsWith("M:")) { flag = "Measured"; str = str.substring(2); }
     else if (str.startsWith("Q:")) { flag = "MeasuredIf"; str = str.substring(2); }
     else if (str.startsWith("Z:")) { flag = "Trigger"; str = str.substring(2); }
+    else if (str.startsWith("G:")) { flag = "AddHits"; str = str.substring(2); }
+    else if (str.startsWith("H:")) { flag = "SubHits"; str = str.substring(2); }
 
     // Hit count requirement like (3)
     let targetHits = 0;
@@ -169,7 +173,6 @@ export class RATriggerParser {
       leftStr = parts[0];
       rightStr = parts[1];
     } else {
-      // Default to != 0 if no comparison operator is supplied
       operator = "!=";
       leftStr = str;
       rightStr = "0";
@@ -227,17 +230,24 @@ export class RATriggerParser {
   }
 
   /**
-   * Evaluate a full trigger (ResetIf -> PauseIf -> Core Group -> Alt Groups).
+   * Evaluate a single condition group according to official rcheevos state machine rules.
    */
-  public static evaluateTrigger(trigger: RATrigger, reader: RAMemoryReader): boolean {
+  public static evaluateGroup(
+    group: RATriggerGroup,
+    reader: RAMemoryReader,
+    allGroups: RATriggerGroup[]
+  ): { pass: boolean; resetFired: boolean; pauseFired: boolean; reqBreakdown: any[] } {
+    const conditions = group.conditions;
+    const reqBreakdown: any[] = [];
+
     let addAddressOffset = 0;
     let addSourceVal = 0;
     let subSourceVal = 0;
 
-    const evalCond = (cond: RACondition) => {
+    const evalMem = (cond: RACondition) => {
       const leftOp = {
         ...cond.left,
-        address: cond.left.address + addAddressOffset,
+        address: cond.left.type === "mem" ? cond.left.address + addAddressOffset : cond.left.address,
       };
       addAddressOffset = 0;
 
@@ -247,59 +257,71 @@ export class RATriggerParser {
 
       const rightVal = this.evaluateOperand(cond.right, reader);
 
-      let pass = false;
+      let rawPass = false;
       switch (cond.operator) {
-        case "=": pass = leftVal === rightVal; break;
-        case "!=": pass = leftVal !== rightVal; break;
-        case "<": pass = leftVal < rightVal; break;
-        case "<=": pass = leftVal <= rightVal; break;
-        case ">": pass = leftVal > rightVal; break;
-        case ">=": pass = leftVal >= rightVal; break;
+        case "=": rawPass = leftVal === rightVal; break;
+        case "!=": rawPass = leftVal !== rightVal; break;
+        case "<": rawPass = leftVal < rightVal; break;
+        case "<=": rawPass = leftVal <= rightVal; break;
+        case ">": rawPass = leftVal > rightVal; break;
+        case ">=": rawPass = leftVal >= rightVal; break;
       }
-      return { pass, leftVal, rightVal };
+      return { rawPass, leftVal, rightVal };
     };
 
-    // 1. ResetIf pass across all conditions in core group
-    let isReset = false;
-    for (const cond of trigger.coreGroup.conditions) {
+    // 1. Check ResetIf conditions across group
+    for (const cond of conditions) {
       if (cond.flag === "ResetIf") {
-        const { pass } = evalCond(cond);
-        if (pass) {
-          isReset = true;
-          break;
+        const { rawPass } = evalMem(cond);
+        if (rawPass) {
+          // Reset all hit counters across all groups
+          for (const g of allGroups) {
+            for (const c of g.conditions) {
+              c.currentHits = 0;
+            }
+          }
+          return { pass: false, resetFired: true, pauseFired: false, reqBreakdown: [] };
         }
       }
     }
 
-    if (isReset) {
-      for (const c of trigger.coreGroup.conditions) c.currentHits = 0;
-      for (const alt of trigger.altGroups) {
-        for (const c of alt.conditions) c.currentHits = 0;
+    // 2. Check ResetNextIf conditions
+    for (let i = 0; i < conditions.length; i++) {
+      const cond = conditions[i];
+      if (cond.flag === "ResetNextIf") {
+        const { rawPass } = evalMem(cond);
+        if (rawPass && i + 1 < conditions.length) {
+          conditions[i + 1].currentHits = 0;
+        }
       }
-      return false;
     }
 
-    // 2. PauseIf pass
-    let isPaused = false;
-    for (const cond of trigger.coreGroup.conditions) {
+    // 3. Check PauseIf conditions
+    for (const cond of conditions) {
       if (cond.flag === "PauseIf") {
-        const { pass } = evalCond(cond);
-        if (pass) {
-          isPaused = true;
-          break;
+        const { rawPass } = evalMem(cond);
+        if (rawPass) {
+          return { pass: false, resetFired: false, pauseFired: true, reqBreakdown: [] };
         }
       }
     }
 
-    if (isPaused) {
-      return false;
-    }
+    // 4. Requirement Conditions Evaluation
+    let groupPass = true;
+    let hasRequirementCond = false;
+    let addHitsAccumulator = 0;
+    let subHitsAccumulator = 0;
+    let skipNextCond = false;
 
-    // 3. Core Group evaluation
-    let corePass = true;
-    for (let i = 0; i < trigger.coreGroup.conditions.length; i++) {
-      const cond = trigger.coreGroup.conditions[i];
+    for (let i = 0; i < conditions.length; i++) {
+      const cond = conditions[i];
 
+      if (skipNextCond) {
+        skipNextCond = false;
+        continue;
+      }
+
+      // Handle Modifiers
       if (cond.flag === "AddAddress") {
         addAddressOffset = this.evaluateOperand(cond.left, reader);
         continue;
@@ -316,64 +338,91 @@ export class RATriggerParser {
         subSourceVal = this.evaluateOperand(cond.left, reader);
         continue;
       }
-      if (cond.flag === "ResetIf" || cond.flag === "PauseIf") {
+      if (cond.flag === "AndNext") {
+        const { rawPass } = evalMem(cond);
+        if (!rawPass) skipNextCond = true;
+        continue;
+      }
+      if (cond.flag === "OrNext") {
+        const { rawPass } = evalMem(cond);
+        if (rawPass) skipNextCond = true;
+        continue;
+      }
+      if (cond.flag === "ResetIf" || cond.flag === "PauseIf" || cond.flag === "ResetNextIf") {
         continue;
       }
 
-      const { pass } = evalCond(cond);
+      // Requirement Condition (none, Measured, MeasuredIf, Trigger, AddHits, SubHits)
+      hasRequirementCond = true;
+      const { rawPass, leftVal, rightVal } = evalMem(cond);
 
       if (cond.targetHits > 0) {
-        if (pass && cond.currentHits < cond.targetHits) {
+        if (rawPass && cond.currentHits < cond.targetHits) {
           cond.currentHits++;
         }
-        const hitsPass = cond.currentHits >= cond.targetHits;
-        if (!hitsPass) corePass = false;
+      }
+
+      let totalHits = cond.currentHits + addHitsAccumulator - subHitsAccumulator;
+      addHitsAccumulator = 0;
+      subHitsAccumulator = 0;
+
+      if (cond.flag === "AddHits") {
+        addHitsAccumulator = totalHits;
+        continue;
+      }
+      if (cond.flag === "SubHits") {
+        subHitsAccumulator = totalHits;
+        continue;
+      }
+
+      let condPass = false;
+      if (cond.targetHits > 0) {
+        condPass = totalHits >= cond.targetHits;
       } else {
-        if (!pass) corePass = false;
+        condPass = rawPass;
+      }
+
+      reqBreakdown.push({
+        index: i + 1,
+        flag: cond.flag,
+        operator: cond.operator,
+        address: cond.left.type === "mem" ? `0x${cond.left.address.toString(16).toUpperCase()}` : "val",
+        leftVal,
+        rightVal,
+        hits: totalHits,
+        targetHits: cond.targetHits,
+        pass: condPass,
+      });
+
+      if (!condPass) {
+        groupPass = false;
       }
     }
 
-    if (!corePass) return false;
+    // A group MUST have at least 1 requirement condition passing to be valid
+    if (!hasRequirementCond) {
+      groupPass = false;
+    }
 
-    // 4. Alt Groups evaluation (OR logic)
+    return { pass: groupPass, resetFired: false, pauseFired: false, reqBreakdown };
+  }
+
+  /**
+   * Evaluate full trigger (Core + Alt Groups).
+   */
+  public static evaluateTrigger(trigger: RATrigger, reader: RAMemoryReader): boolean {
+    const allGroups = [trigger.coreGroup, ...trigger.altGroups];
+
+    // Core Group MUST pass
+    const coreResult = this.evaluateGroup(trigger.coreGroup, reader, allGroups);
+    if (!coreResult.pass) return false;
+
+    // Alt Groups (OR logic)
     if (trigger.altGroups.length > 0) {
       let anyAltPass = false;
       for (const alt of trigger.altGroups) {
-        let groupPass = true;
-        for (const cond of alt.conditions) {
-          if (cond.flag === "AddAddress") {
-            addAddressOffset = this.evaluateOperand(cond.left, reader);
-            continue;
-          }
-          if (cond.flag === "SubAddress") {
-            addAddressOffset = -this.evaluateOperand(cond.left, reader);
-            continue;
-          }
-          if (cond.flag === "AddSource") {
-            addSourceVal = this.evaluateOperand(cond.left, reader);
-            continue;
-          }
-          if (cond.flag === "SubSource") {
-            subSourceVal = this.evaluateOperand(cond.left, reader);
-            continue;
-          }
-          if (cond.flag === "ResetIf" || cond.flag === "PauseIf") {
-            continue;
-          }
-
-          const { pass } = evalCond(cond);
-
-          if (cond.targetHits > 0) {
-            if (pass && cond.currentHits < cond.targetHits) {
-              cond.currentHits++;
-            }
-            const hitsPass = cond.currentHits >= cond.targetHits;
-            if (!hitsPass) groupPass = false;
-          } else {
-            if (!pass) groupPass = false;
-          }
-        }
-        if (groupPass) {
+        const altResult = this.evaluateGroup(alt, reader, allGroups);
+        if (altResult.pass) {
           anyAltPass = true;
           break;
         }

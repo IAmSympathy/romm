@@ -48,12 +48,17 @@ export class RetroAchievementsRuntime {
   }
 
   /**
-   * Load and parse achievements list.
+   * Load and parse achievements list, deduplicating any duplicate achievement IDs.
    */
   public loadAchievements(rawAchievements: any[]) {
     this.achievements = [];
+    const seenIds = new Set<number>();
+
     for (const raw of rawAchievements) {
-      this.achievements.push(this.parseAchievement(raw));
+      const ach = this.parseAchievement(raw);
+      if (seenIds.has(ach.id)) continue;
+      seenIds.add(ach.id);
+      this.achievements.push(ach);
     }
   }
 
@@ -103,7 +108,7 @@ export class RetroAchievementsRuntime {
     console.group("%c[RA Runtime 60Hz Engine]", "color: #22c55e; font-weight: bold; font-size: 14px;");
     console.log("%cGame ID:", "font-weight: bold;", this.gameId);
     console.log("%cCore:", "font-weight: bold;", core);
-    console.log("%cAchievements loaded:", "font-weight: bold;", this.achievements.length);
+    console.log("%cAchievements loaded (deduped):", "font-weight: bold;", this.achievements.length);
     console.log("%cTarget frequency:", "font-weight: bold;", "60.0 Hz (Frame-Synchronous)");
     console.groupEnd();
 
@@ -141,7 +146,7 @@ export class RetroAchievementsRuntime {
     const core = ((window as any).EJS_core || "fceumm").toLowerCase();
     if (core.includes("fceumm") || core.includes("nestopia") || core.includes("nes")) {
       const gameState = this.readMemory(0x0770, 1);
-      if (gameState === 0) return true; // 0 = Title Screen / Demo Mode in SMB NES
+      if (gameState === 0) return true;
     }
     return false;
   }
@@ -189,7 +194,7 @@ export class RetroAchievementsRuntime {
     }
 
     const demoDetected = this.isDemoModeActive();
-    const shouldLogDiagnostic = this.frameIndex % 300 === 0; // Log frequency diagnostic every 5 seconds (300 frames)
+    const shouldLogDiagnostic = this.frameIndex % 300 === 0;
 
     if (shouldLogDiagnostic) {
       console.groupCollapsed(`%c[RA Evaluation Frequency] Frame #${this.frameIndex}`, "color: #3b82f6; font-weight: bold;");
@@ -197,16 +202,7 @@ export class RetroAchievementsRuntime {
         "Current frame": this.frameIndex,
         "Checks per second": `${this.checksPerSecond.toFixed(1)} Hz`,
         "Last evaluation time": `${this.lastEvaluationMs.toFixed(3)} ms`,
-        "Demo State Detected": demoDetected ? "YES (Evaluation guarded/reset)" : "NO (In-Game)",
-      });
-
-      const memInfo = this.memoryReader.getDiagnosticInfo();
-      console.log("%c[RA Memory Info]", "font-weight: bold;", {
-        heapAvailable: memInfo.heapAvailable,
-        heapSize: `${memInfo.heapSize} bytes`,
-        ramOffset: `0x${memInfo.ramOffset.toString(16).toUpperCase()}`,
-        ramSize: `${memInfo.ramSize} bytes`,
-        source: memInfo.source,
+        "Demo State Active": demoDetected ? "YES (Attract Mode)" : "NO (In-Game)",
       });
 
       const activeList = this.achievements.filter((a) => !a.unlocked);
@@ -223,35 +219,22 @@ export class RetroAchievementsRuntime {
       const isSatisfied = RATriggerParser.evaluateTrigger(ach.trigger, this.memoryReader);
 
       if (isSatisfied) {
-        const condDetails = ach.trigger.coreGroup.conditions.map((cond, idx) => {
-          const leftVal = RATriggerParser.evaluateOperand(cond.left, this.memoryReader);
-          const deltaVal = cond.left.type === "mem" ? this.readMemory(cond.left.address, cond.left.size, true) : null;
-          const rightVal = RATriggerParser.evaluateOperand(cond.right, this.memoryReader);
-          return {
-            index: idx + 1,
-            flag: cond.flag,
-            operator: cond.operator,
-            address: cond.left.type === "mem" ? `0x${cond.left.address.toString(16).toUpperCase()}` : "val",
-            currentVal: leftVal,
-            deltaVal: deltaVal,
-            expectedVal: rightVal,
-            currentHits: cond.currentHits,
-            targetHits: cond.targetHits,
-            satisfied: cond.targetHits > 0 ? cond.currentHits >= cond.targetHits : true,
-          };
-        });
+        const coreResult = RATriggerParser.evaluateGroup(
+          ach.trigger.coreGroup,
+          this.memoryReader,
+          [ach.trigger.coreGroup, ...ach.trigger.altGroups]
+        );
 
         console.group("%c[RA Achievement Evaluation — UNLOCK DETECTED]", "color: #22c55e; font-weight: bold; font-size: 14px;");
         console.log("%cAchievement:", "font-weight: bold;", ach.title);
         console.log("%cFrame:", "font-weight: bold;", this.frameIndex);
         console.log("%cTrigger:", "font-weight: bold;", ach.triggerStr);
         console.log("%cChecks per second:", "font-weight: bold;", `${this.checksPerSecond.toFixed(1)} Hz`);
-        console.log("%cDemo Mode Active:", "font-weight: bold;", demoDetected ? "YES" : "NO");
 
-        console.group("%cConditions Breakdown:", "color: #eab308; font-weight: bold;");
-        condDetails.forEach((c) => {
+        console.group("%cRequirement Conditions Breakdown:", "color: #eab308; font-weight: bold;");
+        coreResult.reqBreakdown.forEach((c) => {
           console.log(
-            `Condition #${c.index} [${c.flag}] | Address: ${c.address} | Current: ${c.currentVal} (Delta: ${c.deltaVal}) ${c.operator} Expected: ${c.expectedVal} | Hits: ${c.currentHits}/${c.targetHits} => Result: TRUE`
+            `Requirement #${c.index} [${c.flag}] | Address: ${c.address} | Current: ${c.leftVal} ${c.operator} Expected: ${c.rightVal} | Hits: ${c.hits}/${c.targetHits} => Result: PASS`
           );
         });
         console.groupEnd();
