@@ -53,6 +53,7 @@ import { usePlaySession } from "@/v2/composables/usePlaySession";
 import type { SliderBtnGroupItem } from "@/v2/lib/primitives/RSliderBtnGroup/types";
 import storeGalleryRoms from "@/v2/stores/galleryRoms";
 import {
+  resolveOverlayHost,
   resolveBezelHost,
   resolveBezelUrl,
   resolveStoredBezelVisible,
@@ -228,11 +229,11 @@ const showBezel = useLocalStorage(`player:${morphRomId.value}:bezel`, true, {
 });
 
 // When EmulatorJS enters fullscreen it promotes its own `#game` container to
-// the top layer, so a bezel that is merely a sibling would disappear. Track
-// that container here and teleport the bezel into it while fullscreen (#3939).
-const bezelHost = ref<HTMLElement | null>(null);
+// the top layer, so overlays (bezel, RA notifications, challenge indicators)
+// must teleport into it to stay visible in the top layer (#3939).
+const overlayHost = ref<HTMLElement | null>(null);
 useEventListener(document, "fullscreenchange", () => {
-  bezelHost.value = resolveBezelHost(document.fullscreenElement);
+  overlayHost.value = resolveOverlayHost(document.fullscreenElement);
 });
 
 // Background art keeps the plain 2D cover — a blurred disc / cartridge
@@ -798,11 +799,24 @@ const selectedAsset = computed<SaveSchema | StateSchema | null>(() =>
 
     <!-- Running state -->
     <div v-else-if="rom" class="r-v2-ejs__stage">
-      <Teleport :to="bezelHost" :disabled="!bezelHost">
-      <RANotifications
-        :notifications="raManager.notifications.value"
-        @dismiss="raManager.dismissNotification"
-      />
+      <!-- Fullscreen and Windowed Overlay Host -->
+      <Teleport :to="overlayHost" :disabled="!overlayHost">
+        <div class="r-v2-ejs__overlay-host">
+          <RANotifications
+            :notifications="raManager.notifications.value"
+            @dismiss="raManager.dismissNotification"
+          />
+          <!-- Bezel overlay drawn around the game canvas. Purely decorative and
+               click-through, so pointer events reach the emulator underneath. -->
+          <img
+            v-if="bezelUrl && showBezel"
+            :src="bezelUrl"
+            class="r-v2-ejs__bezel"
+            alt=""
+            aria-hidden="true"
+            draggable="false"
+          />
+        </div>
       </Teleport>
       <Player
         :rom="rom"
@@ -812,20 +826,6 @@ const selectedAsset = computed<SaveSchema | StateSchema | null>(() =>
         :core="selectedCore"
         :disc="selectedDisc"
       />
-      <!-- Bezel overlay drawn around the game canvas. Purely decorative and
-           click-through, so pointer events reach the emulator underneath. In
-           fullscreen it teleports into the emulator's top-layer container so it
-           keeps framing the game; otherwise it renders here over the stage. -->
-      <Teleport :to="bezelHost" :disabled="!bezelHost">
-        <img
-          v-if="bezelUrl && showBezel"
-          :src="bezelUrl"
-          class="r-v2-ejs__bezel"
-          alt=""
-          aria-hidden="true"
-          draggable="false"
-        />
-      </Teleport>
     </div>
   </section>
 
@@ -1031,6 +1031,15 @@ const selectedAsset = computed<SaveSchema | StateSchema | null>(() =>
   inset: var(--r-nav-h) 0 0 0;
   background: var(--r-color-canvas-bg);
   z-index: 1;
+}
+
+/* Dedicated fullscreen and windowed overlay host container */
+.r-v2-ejs__overlay-host {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+  overflow: hidden;
 }
 
 /* Scraped bezel framing the running game. Full-height, centred, aspect

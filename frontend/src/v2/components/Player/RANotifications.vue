@@ -360,4 +360,19 @@ function onImgError(item: RANotificationItem) {
   opacity: 0;
   transform: translateX(-16px) scale(0.92);
 }
+
+/* Ensure MDI font family & glyph rendering is preserved when teleported into #game container */
+:deep(.v-icon),
+:deep(.mdi),
+:deep([class*="mdi-"]) {
+  font-family: "Material Design Icons" !important;
+}
+
+:deep(.v-icon::before),
+:deep(.mdi::before),
+:deep([class*="mdi-"]::before) {
+  font-family: "Material Design Icons" !important;
+  font-style: normal !important;
+  font-weight: normal !important;
+}
 </style>

@@ -16,14 +16,15 @@ export function resolveBezelUrl(
   return bezelPath ? `${FRONTEND_RESOURCES_PATH}/${bezelPath}` : null;
 }
 
-// Where the bezel overlay should live for a given fullscreen state.
+// Where fullscreen overlays (bezel, RetroAchievements notifications, challenge indicators)
+// should live for a given fullscreen state.
 //
 // EmulatorJS fullscreens its own `#game` container (tagged `.ejs_parent`) via
-// the Fullscreen API, which promotes it to the top layer; a bezel that is only
-// a sibling of `#game` then vanishes. So when that container is the fullscreen
-// element, the bezel must teleport *into* it to keep framing the game. Any
+// the Fullscreen API, which promotes it to the top layer; overlays that are only
+// siblings of `#game` then vanish. So when that container is the fullscreen
+// element, overlays must teleport *into* it to stay visible in the top layer. Any
 // other (or absent) fullscreen element means render in place over the stage.
-export function resolveBezelHost(
+export function resolveOverlayHost(
   fullscreenElement: Element | null,
 ): HTMLElement | null {
   if (
@@ -35,6 +36,8 @@ export function resolveBezelHost(
   }
   return null;
 }
+
+export const resolveBezelHost = resolveOverlayHost;
 
 // Whether the per-game bezel toggle should start on. Bezels default to shown;
 // only an explicit "0" (the user hid a bad/misaligned bezel for this game)

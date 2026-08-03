@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   resolveBezelHost,
+  resolveOverlayHost,
   resolveBezelUrl,
   resolveStoredBezelVisible,
 } from "./playerBezel";
@@ -22,6 +23,24 @@ describe("resolveBezelUrl", () => {
 
   it("returns null for an empty path rather than a bare resources root", () => {
     expect(resolveBezelUrl("")).toBeNull();
+  });
+});
+
+describe("resolveOverlayHost", () => {
+  it("adopts the fullscreen element when it is the #game container", () => {
+    const game = document.createElement("div");
+    game.id = "game";
+    expect(resolveOverlayHost(game)).toBe(game);
+  });
+
+  it("adopts the fullscreen element when it carries the ejs_parent class", () => {
+    const parent = document.createElement("div");
+    parent.classList.add("ejs_parent");
+    expect(resolveOverlayHost(parent)).toBe(parent);
+  });
+
+  it("returns null when nothing is fullscreen", () => {
+    expect(resolveOverlayHost(null)).toBeNull();
   });
 });
 

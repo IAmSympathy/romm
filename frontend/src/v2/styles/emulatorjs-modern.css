@@ -6,6 +6,39 @@ div#game .ejs_menu_bar_parent {
   font-family: var(--r-font-sans, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif) !important;
 }
 
+/* Preserve Material Design Icons font family & glyph rendering inside EmulatorJS / overlay hosts */
+div#game .r-v2-ejs__overlay-host .v-icon,
+div#game .r-v2-ejs__overlay-host .mdi,
+div#game .r-v2-ejs__overlay-host [class*="mdi-"],
+div#game .r-ra-notifs .v-icon,
+div#game .r-ra-notifs .mdi,
+div#game .r-ra-notifs [class*="mdi-"],
+.r-v2-ejs__overlay-host .v-icon,
+.r-v2-ejs__overlay-host .mdi,
+.r-v2-ejs__overlay-host [class*="mdi-"],
+.r-ra-notifs .v-icon,
+.r-ra-notifs .mdi,
+.r-ra-notifs [class*="mdi-"] {
+  font-family: "Material Design Icons" !important;
+}
+
+div#game .r-v2-ejs__overlay-host .v-icon::before,
+div#game .r-v2-ejs__overlay-host .mdi::before,
+div#game .r-v2-ejs__overlay-host [class*="mdi-"]::before,
+div#game .r-ra-notifs .v-icon::before,
+div#game .r-ra-notifs .mdi::before,
+div#game .r-ra-notifs [class*="mdi-"]::before,
+.r-v2-ejs__overlay-host .v-icon::before,
+.r-v2-ejs__overlay-host .mdi::before,
+.r-v2-ejs__overlay-host [class*="mdi-"]::before,
+.r-ra-notifs .v-icon::before,
+.r-ra-notifs .mdi::before,
+.r-ra-notifs [class*="mdi-"]::before {
+  font-family: "Material Design Icons" !important;
+  font-style: normal !important;
+  font-weight: normal !important;
+}
+
 /* 1. DISPLAY SAFETY: HIDE CLOSED POPUPS */
 div#game .ejs_popup_container[style*="display: none"],
 div#game .ejs_popup_container[style*="display:none"] {
