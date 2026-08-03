@@ -15,17 +15,37 @@ function onDismiss(id: string) {
   emit("dismiss", id);
 }
 
-function onImgLoad(item: RANotificationItem) {
-  if (item.type === "game_detected") {
-    console.log(`%c[RA Set Detection] Image chargée: SUCCESS (${item.badgeUrl})`, "color: #22c55e; font-weight: bold;");
-  }
+import { ref } from "vue";
+
+const failedImageUrls = ref(new Set<string>());
+const urlLoadCounts = new Map<string, number>();
+
+function onImgLoad(item: RANotificationItem, e: Event) {
+  const target = e.target as HTMLImageElement;
+  console.log("%c[RA IMAGE LOAD]", "color: #22c55e; font-weight: bold;", {
+    src: target.src,
+    timestamp: new Date().toISOString(),
+  });
 }
 
-function onImgError(item: RANotificationItem) {
-  if (item.type === "game_detected") {
-    console.warn(`[RA Set Detection] Image chargée: FAILED (${item.badgeUrl})`);
-  }
-  // Clear broken badgeUrl to gracefully fall back to clean local v-icon without repeating broken requests
+function onImgError(item: RANotificationItem, e: Event) {
+  const target = e.target as HTMLImageElement;
+  const currentSrc = target.src || item.badgeUrl || "";
+
+  const attempts = (urlLoadCounts.get(currentSrc) || 0) + 1;
+  urlLoadCounts.set(currentSrc, attempts);
+
+  const alreadyFailed = failedImageUrls.value.has(currentSrc);
+  failedImageUrls.value.add(currentSrc);
+
+  console.warn("%c[RA IMAGE ERROR]", "color: #ef4444; font-weight: bold;", {
+    src: currentSrc,
+    attempts,
+    alreadyFailed,
+    fallbackAttempted: "None (Fallback to clean local v-icon)",
+  });
+
+  target.onerror = null;
   item.badgeUrl = undefined;
 }
 </script>
@@ -42,12 +62,12 @@ function onImgError(item: RANotificationItem) {
       >
         <div class="r-ra-notif-card__icon-wrapper">
           <img
-            v-if="item.badgeUrl"
+            v-if="item.badgeUrl && !failedImageUrls.has(item.badgeUrl)"
             :src="item.badgeUrl"
             class="r-ra-notif-card__badge"
             alt=""
-            @load="onImgLoad(item)"
-            @error="onImgError(item)"
+            @load="onImgLoad(item, $event)"
+            @error="onImgError(item, $event)"
           />
           <v-icon
             v-else-if="item.type === 'auth_success'"
