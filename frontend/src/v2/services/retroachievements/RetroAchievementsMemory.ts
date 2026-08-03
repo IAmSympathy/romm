@@ -109,7 +109,11 @@ export class RetroAchievementsMemory {
       }
       if (address >= 0xc000 && address <= 0xdfff) {
         // WRAM (0xC000 - 0xDFFF)
-        return address - 0xC000;
+        return address - 0xc000;
+      }
+      if (address >= 0xff80 && address <= 0xfffe) {
+        // HRAM (High RAM 0xFF80 - 0xFFFE): Preserve exact CPU address for Multi-Region / HRAM Provider
+        return address;
       }
       return address >= 0xc000 ? address - 0xc000 : address;
     }

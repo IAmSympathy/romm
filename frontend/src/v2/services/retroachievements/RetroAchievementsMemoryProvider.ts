@@ -1,10 +1,19 @@
+export interface MemoryRegion {
+  name: string;
+  startAddress: number;
+  endAddress: number;
+  wasmPointer: number;
+  size: number;
+}
+
 export interface IMemoryProvider {
   name: string;
+  regions?: MemoryRegion[];
   isAvailable(): boolean;
   resolve(): boolean;
-  readByte(address: number, bit?: number | null, isDelta?: boolean): number;
-  readWord(address: number, isDelta?: boolean, endian?: "little" | "big"): number;
-  readDword(address: number, isDelta?: boolean, endian?: "little" | "big"): number;
+  readByte(address: number, bit?: number | null, realAddress?: number): number;
+  readWord(address: number, isDelta?: boolean, endian?: "little" | "big", realAddress?: number): number;
+  readDword(address: number, isDelta?: boolean, endian?: "little" | "big", realAddress?: number): number;
 }
 
 /**
@@ -192,6 +201,7 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
   public isResolvedState: boolean = false;
   public activeFnName: string = "";
   public parsedMemoryMap: RetroMemoryMap | null = null;
+  public regions: MemoryRegion[] = [];
 
   public isAvailable(): boolean {
     const emu = (window as any).EJS_emulator;
@@ -245,18 +255,30 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     const fnToTest = mod.EmulatorJSGetMemoryData || asm.EmulatorJSGetMemoryData || mod._get_memory_data || asm._get_memory_data;
     const fnSize = mod.EmulatorJSGetMemorySize || asm.EmulatorJSGetMemorySize || mod._get_memory_size || asm._get_memory_size || mod.retro_get_memory_size || asm.retro_get_memory_size;
 
-    const probedIntegerIds: { id: number; ptr: number; size: number; previewHex: string }[] = [];
+    const probedIntegerIds: { id: number; ptr: number; size: number; first32Hex: string; last32Hex: string }[] = [];
     if (typeof fnToTest === "function") {
       for (let id = 0; id <= 32; id++) {
         try {
           const ptr = fnToTest(id);
           if (typeof ptr === "number" && ptr > 0 && ptr < heap.length) {
             const sz = typeof fnSize === "function" ? (fnSize(id) || 0) : 0;
-            const bytes: string[] = [];
+            const effectiveSize = sz > 0 ? sz : 256;
+            const first32: string[] = [];
             for (let b = 0; b < 32 && ptr + b < heap.length; b++) {
-              bytes.push(heap[ptr + b].toString(16).toUpperCase().padStart(2, "0"));
+              first32.push(heap[ptr + b].toString(16).toUpperCase().padStart(2, "0"));
             }
-            probedIntegerIds.push({ id, ptr, size: sz, previewHex: bytes.join(" ") });
+            const last32: string[] = [];
+            const startLast = Math.max(0, effectiveSize - 32);
+            for (let b = 0; b < 32 && ptr + startLast + b < heap.length; b++) {
+              last32.push(heap[ptr + startLast + b].toString(16).toUpperCase().padStart(2, "0"));
+            }
+            probedIntegerIds.push({
+              id,
+              ptr,
+              size: sz,
+              first32Hex: first32.join(" "),
+              last32Hex: last32.join(" "),
+            });
           }
         } catch {}
       }
@@ -277,8 +299,14 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     if (probedIntegerIds.length > 0) {
       console.log("%c[Probed Libretro Integer Memory IDs 0..32]:", "color: #06b6d4; font-weight: bold;");
       probedIntegerIds.forEach((item) => {
-        console.log(`  ID ${item.id}: Pointer 0x${item.ptr.toString(16).toUpperCase()} | Size: ${item.size} bytes | First 32 bytes: ${item.previewHex}`);
+        console.log(
+          `  ID ${item.id}: Pointer 0x${item.ptr.toString(16).toUpperCase()} | Size: ${item.size} bytes\n` +
+          `      First 32 bytes: ${item.first32Hex}\n` +
+          `      Last 32 bytes:  ${item.last32Hex}`
+        );
       });
+    } else {
+      console.log("%c[Probed Libretro Integer Memory IDs 0..32]: No non-zero pointers returned.", "color: #ef4444; font-weight: bold;");
     }
     console.groupEnd();
 
@@ -342,6 +370,11 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
                 this.ramSize = sz;
                 this.isResolvedState = true;
                 this.activeFnName = `EmulatorJSGetMemoryData("${strKey}")`;
+
+                this.regions = [
+                  { name: "WRAM (0xC000-0xDFFF)", startAddress: 0xc000, endAddress: 0xdfff, wasmPointer: ptr, size: 0x2000 },
+                  { name: "Echo RAM (0xE000-0xFDFF)", startAddress: 0xe000, endAddress: 0xfdff, wasmPointer: ptr, size: 0x1e00 }
+                ];
               }
             }
           }
@@ -363,6 +396,19 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     console.groupEnd();
 
     this.probeLibretroMemoryMap();
+
+    if (this.parsedMemoryMap && this.parsedMemoryMap.descriptors) {
+      const hramDesc = this.parsedMemoryMap.descriptors.find(d => d.start === 0xff80 || (0xff80 >= d.start && 0xff80 < d.start + d.len));
+      if (hramDesc && hramDesc.ptr > 0) {
+        this.regions.push({
+          name: "HRAM (0xFF80-0xFFFE)",
+          startAddress: hramDesc.start,
+          endAddress: hramDesc.start + hramDesc.len - 1,
+          wasmPointer: hramDesc.ptr + hramDesc.offset,
+          size: hramDesc.len
+        });
+      }
+    }
 
     if (this.isResolvedState) {
       this.dumpGameBoyHRAMDiagnostic();
@@ -463,14 +509,25 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     const heap = mod?.HEAPU8;
     if (!heap) return 0;
 
+    const targetAddr = realAddress !== undefined ? realAddress : address;
     let ptr = 0;
     let provId = "RETRO_MEMORY_SYSTEM_RAM (ID 2)";
 
-    if (this.parsedMemoryMap && realAddress !== undefined) {
-      const resolved = resolveDescriptorAddress(this.parsedMemoryMap, realAddress);
+    if (this.parsedMemoryMap && targetAddr !== undefined) {
+      const resolved = resolveDescriptorAddress(this.parsedMemoryMap, targetAddr);
       if (resolved) {
         ptr = resolved.wasmPointer;
         provId = `retro_memory_map desc (start: 0x${resolved.desc.start.toString(16).toUpperCase()})`;
+      }
+    }
+
+    if (ptr === 0 && this.regions.length > 0 && targetAddr !== undefined) {
+      const matchedRegion = this.regions.find(
+        (r) => targetAddr >= r.startAddress && targetAddr <= r.endAddress
+      );
+      if (matchedRegion) {
+        ptr = matchedRegion.wasmPointer + (targetAddr - matchedRegion.startAddress);
+        provId = `Multi-Region: ${matchedRegion.name}`;
       }
     }
 
@@ -478,14 +535,18 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
       ptr = this.ramOffset + address;
     }
 
-    if (ptr >= heap.length) return 0;
+    if (ptr >= heap.length || ptr < 0) return 0;
     let val = heap[ptr];
     if (bit !== undefined && bit !== null && bit >= 0 && bit <= 7) {
       val = (val >> bit) & 1;
     }
 
-    const cpuAddrHex = `0x${(realAddress !== undefined ? realAddress : address).toString(16).toUpperCase().padStart(4, "0")}`;
-    console.log(`[RA Read Byte] CPU address ${cpuAddrHex} -> provider ID: ${provId} -> WASM ptr: 0x${ptr.toString(16).toUpperCase()} -> offset: 0x${address.toString(16).toUpperCase()} (${address}) -> value: ${val}`);
+    const cpuAddrHex = `0x${targetAddr.toString(16).toUpperCase().padStart(4, "0")}`;
+    if (targetAddr >= 0xff80 && targetAddr <= 0xfffe) {
+      console.log(`%c[RA HRAM Read Byte] CPU address ${cpuAddrHex} -> provider ID: ${provId} -> WASM ptr: 0x${ptr.toString(16).toUpperCase()} -> value: ${val}`, "color: #f59e0b; font-weight: bold;");
+    } else {
+      console.log(`[RA Read Byte] CPU address ${cpuAddrHex} -> provider ID: ${provId} -> WASM ptr: 0x${ptr.toString(16).toUpperCase()} -> offset: 0x${address.toString(16).toUpperCase()} (${address}) -> value: ${val}`);
+    }
 
     return val;
   }
@@ -497,11 +558,22 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     const heap = mod?.HEAPU8;
     if (!heap) return 0;
 
+    const targetAddr = realAddress !== undefined ? realAddress : address;
     let ptr = 0;
-    if (this.parsedMemoryMap && realAddress !== undefined) {
-      const resolved = resolveDescriptorAddress(this.parsedMemoryMap, realAddress);
+
+    if (this.parsedMemoryMap && targetAddr !== undefined) {
+      const resolved = resolveDescriptorAddress(this.parsedMemoryMap, targetAddr);
       if (resolved) {
         ptr = resolved.wasmPointer;
+      }
+    }
+
+    if (ptr === 0 && this.regions.length > 0 && targetAddr !== undefined) {
+      const matchedRegion = this.regions.find(
+        (r) => targetAddr >= r.startAddress && targetAddr <= r.endAddress
+      );
+      if (matchedRegion) {
+        ptr = matchedRegion.wasmPointer + (targetAddr - matchedRegion.startAddress);
       }
     }
 
@@ -509,7 +581,7 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
       ptr = this.ramOffset + address;
     }
 
-    if (ptr + 1 >= heap.length) return 0;
+    if (ptr + 1 >= heap.length || ptr < 0) return 0;
     return endian === "little" ? heap[ptr] | (heap[ptr + 1] << 8) : (heap[ptr] << 8) | heap[ptr + 1];
   }
 
@@ -520,11 +592,22 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     const heap = mod?.HEAPU8;
     if (!heap) return 0;
 
+    const targetAddr = realAddress !== undefined ? realAddress : address;
     let ptr = 0;
-    if (this.parsedMemoryMap && realAddress !== undefined) {
-      const resolved = resolveDescriptorAddress(this.parsedMemoryMap, realAddress);
+
+    if (this.parsedMemoryMap && targetAddr !== undefined) {
+      const resolved = resolveDescriptorAddress(this.parsedMemoryMap, targetAddr);
       if (resolved) {
         ptr = resolved.wasmPointer;
+      }
+    }
+
+    if (ptr === 0 && this.regions.length > 0 && targetAddr !== undefined) {
+      const matchedRegion = this.regions.find(
+        (r) => targetAddr >= r.startAddress && targetAddr <= r.endAddress
+      );
+      if (matchedRegion) {
+        ptr = matchedRegion.wasmPointer + (targetAddr - matchedRegion.startAddress);
       }
     }
 
@@ -532,7 +615,7 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
       ptr = this.ramOffset + address;
     }
 
-    if (ptr + 3 >= heap.length) return 0;
+    if (ptr + 3 >= heap.length || ptr < 0) return 0;
     return endian === "little"
       ? (heap[ptr] | (heap[ptr + 1] << 8) | (heap[ptr + 2] << 16) | (heap[ptr + 3] << 24)) >>> 0
       : ((heap[ptr] << 24) | (heap[ptr + 1] << 16) | (heap[ptr + 2] << 8) | heap[ptr + 3]) >>> 0;
@@ -953,18 +1036,18 @@ export class RetroAchievementsMemoryProviderManager {
     return null;
   }
 
-  public readByte(address: number, bit?: number | null, isDelta?: boolean): number {
+  public readByte(address: number, bit?: number | null, realAddress?: number): number {
     if (!this.activeProvider) return 0;
-    return this.activeProvider.readByte(address, bit, isDelta);
+    return this.activeProvider.readByte(address, bit, realAddress);
   }
 
-  public readWord(address: number, isDelta?: boolean, endian: "little" | "big" = "little"): number {
+  public readWord(address: number, isDelta?: boolean, endian: "little" | "big" = "little", realAddress?: number): number {
     if (!this.activeProvider) return 0;
-    return this.activeProvider.readWord(address, isDelta, endian);
+    return this.activeProvider.readWord(address, isDelta, endian, realAddress);
   }
 
-  public readDword(address: number, isDelta?: boolean, endian: "little" | "big" = "little"): number {
+  public readDword(address: number, isDelta?: boolean, endian: "little" | "big" = "little", realAddress?: number): number {
     if (!this.activeProvider) return 0;
-    return this.activeProvider.readDword(address, isDelta, endian);
+    return this.activeProvider.readDword(address, isDelta, endian, realAddress);
   }
 }
