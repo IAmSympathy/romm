@@ -172,9 +172,10 @@ export class RetroAchievementsMemory {
 
     let val = 0;
     if (this.providerManager.activeProvider) {
-      if (size === 1) val = this.providerManager.readByte(mappedAddress, bit);
-      else if (size === 2) val = this.providerManager.readWord(mappedAddress, false, endian);
-      else if (size === 4) val = this.providerManager.readDword(mappedAddress, false, endian);
+      const activeP = this.providerManager.activeProvider as any;
+      if (size === 1) val = activeP.readByte(mappedAddress, bit, address);
+      else if (size === 2) val = activeP.readWord(mappedAddress, false, endian, address);
+      else if (size === 4) val = activeP.readDword(mappedAddress, false, endian, address);
     } else if (this.isResolved) {
       const { wasmPointer } = this.resolveAddress(address);
       const discovery = this.discoverMemory();

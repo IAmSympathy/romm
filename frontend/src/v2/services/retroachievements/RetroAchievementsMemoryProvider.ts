@@ -45,6 +45,111 @@ export function logWASMBinaryDetails() {
   console.groupEnd();
 }
 
+export interface RetroMemoryDescriptor {
+  flags: number;
+  ptr: number;
+  offset: number;
+  start: number;
+  select: number;
+  disconnect: number;
+  len: number;
+  addrspace: string;
+}
+
+export interface RetroMemoryMap {
+  descriptors: RetroMemoryDescriptor[];
+  numDescriptors: number;
+}
+
+export function parseWasmMemoryMap(mmapPtr: number, heap: Uint8Array): RetroMemoryMap | null {
+  if (mmapPtr <= 0 || mmapPtr >= heap.length - 8) return null;
+
+  try {
+    const view = new DataView(heap.buffer, heap.byteOffset, heap.byteLength);
+    const descriptorsPtr = view.getUint32(mmapPtr, true);
+    const numDescriptors = view.getUint32(mmapPtr + 4, true);
+
+    if (numDescriptors === 0 || numDescriptors > 64 || descriptorsPtr <= 0 || descriptorsPtr >= heap.length) {
+      return null;
+    }
+
+    const descriptors: RetroMemoryDescriptor[] = [];
+    const descSize = 36;
+
+    for (let i = 0; i < numDescriptors; i++) {
+      const descPtr = descriptorsPtr + i * descSize;
+      if (descPtr + descSize > heap.length) break;
+
+      const ptr = view.getUint32(descPtr + 8, true);
+      const offset = view.getUint32(descPtr + 12, true);
+      const start = view.getUint32(descPtr + 16, true);
+      const select = view.getUint32(descPtr + 20, true);
+      const disconnect = view.getUint32(descPtr + 24, true);
+      const len = view.getUint32(descPtr + 28, true);
+      const addrspacePtr = view.getUint32(descPtr + 32, true);
+
+      let addrspace = "";
+      if (addrspacePtr > 0 && addrspacePtr < heap.length) {
+        let str = "";
+        for (let s = 0; s < 64; s++) {
+          const b = heap[addrspacePtr + s];
+          if (b === 0) break;
+          str += String.fromCharCode(b);
+        }
+        addrspace = str;
+      }
+
+      descriptors.push({
+        flags: view.getUint32(descPtr, true),
+        ptr,
+        offset,
+        start,
+        select,
+        disconnect,
+        len,
+        addrspace,
+      });
+    }
+
+    return { descriptors, numDescriptors: descriptors.length };
+  } catch {
+    return null;
+  }
+}
+
+export function resolveDescriptorAddress(
+  mmap: RetroMemoryMap,
+  realAddress: number
+): { desc: RetroMemoryDescriptor; offset: number; wasmPointer: number } | null {
+  for (const desc of mmap.descriptors) {
+    if (desc.ptr === 0) continue;
+
+    if (desc.select === 0) {
+      if (realAddress >= desc.start && realAddress < desc.start + desc.len) {
+        const offset = realAddress - desc.start;
+        const wasmPointer = desc.ptr + desc.offset + offset;
+        return { desc, offset, wasmPointer };
+      }
+    } else {
+      if (((desc.start ^ realAddress) & desc.select) === 0) {
+        let reducedAddress = realAddress - desc.start;
+        let disconnectMask = desc.disconnect;
+        while (disconnectMask !== 0) {
+          const tmp = (disconnectMask - 1) & ~disconnectMask;
+          reducedAddress = (reducedAddress & tmp) | ((reducedAddress >> 1) & ~tmp);
+          disconnectMask = (disconnectMask & (disconnectMask - 1)) >> 1;
+        }
+        if (reducedAddress < desc.len) {
+          const wasmPointer = desc.ptr + desc.offset + reducedAddress;
+          return { desc, offset: reducedAddress, wasmPointer };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 /**
  * Strategy 1: EmulatorJSMemoryProvider
  * Tests standard Libretro memory key constants on EmulatorJSGetMemoryData(key).
@@ -55,6 +160,7 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
   public ramSize: number = 0;
   public isResolvedState: boolean = false;
   public activeFnName: string = "";
+  public parsedMemoryMap: RetroMemoryMap | null = null;
 
   public isAvailable(): boolean {
     const emu = (window as any).EJS_emulator;
@@ -66,6 +172,63 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
       typeof asm?._get_memory_data === "function";
   }
 
+  public probeLibretroMemoryMap(): RetroMemoryMap | null {
+    const emu = (window as any).EJS_emulator;
+    const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
+    if (!mod || !mod.HEAPU8) return null;
+
+    const asm = mod.asm || mod.wasmExports || {};
+    const heap = mod.HEAPU8;
+
+    const mapFn = mod.EmulatorJSGetMemoryMap || asm.EmulatorJSGetMemoryMap ||
+                  mod._retro_get_memory_map || asm._retro_get_memory_map ||
+                  mod.retro_get_memory_map || asm.retro_get_memory_map ||
+                  mod._get_memory_map || asm._get_memory_map;
+
+    let mmapPtr = 0;
+
+    if (typeof mapFn === "function") {
+      try {
+        const res = mapFn();
+        if (typeof res === "number" && res > 0 && res < heap.length) {
+          mmapPtr = res;
+        } else if (typeof res === "object" && res.descriptors) {
+          this.parsedMemoryMap = res;
+        }
+      } catch (e) {
+        console.warn("[RA Memory Map Probe] Error calling memory map function:", e);
+      }
+    }
+
+    if (mmapPtr === 0) {
+      const symPtr = mod.retro_memory_map || mod._retro_memory_map || asm.retro_memory_map || asm._retro_memory_map;
+      if (typeof symPtr === "number" && symPtr > 0 && symPtr < heap.length) {
+        mmapPtr = symPtr;
+      }
+    }
+
+    if (mmapPtr > 0 && !this.parsedMemoryMap) {
+      this.parsedMemoryMap = parseWasmMemoryMap(mmapPtr, heap);
+    }
+
+    console.group("%c[RA Libretro Memory Map Probe]", "color: #8b5cf6; font-weight: bold; font-size: 14px;");
+    if (this.parsedMemoryMap && this.parsedMemoryMap.numDescriptors > 0) {
+      console.log(`%cFound official retro_memory_map with ${this.parsedMemoryMap.numDescriptors} descriptor(s):`, "color: #22c55e; font-weight: bold;");
+      this.parsedMemoryMap.descriptors.forEach((d, idx) => {
+        console.log(
+          `  [Desc #${idx + 1}] Start: 0x${d.start.toString(16).toUpperCase()} | Len: 0x${d.len.toString(16).toUpperCase()} (${d.len} bytes) | WASM Ptr: 0x${d.ptr.toString(16).toUpperCase()} | Select: 0x${d.select.toString(16).toUpperCase()} | Disconnect: 0x${d.disconnect.toString(16).toUpperCase()} | AddrSpace: "${d.addrspace}"`
+        );
+      });
+    } else {
+      console.log("%cNo official retro_memory_map descriptor table exposed by WASM module exports.", "color: #f59e0b; font-weight: bold;");
+      console.log("Tested functions: EmulatorJSGetMemoryMap, _retro_get_memory_map, retro_get_memory_map, _get_memory_map");
+      console.log("Tested symbols: retro_memory_map, _retro_memory_map");
+    }
+    console.groupEnd();
+
+    return this.parsedMemoryMap;
+  }
+
   public resolve(): boolean {
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
@@ -75,6 +238,7 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     const validKeys: { key: string; result: any; pointer: number; size: number }[] = [];
 
     const fnToTest = mod.EmulatorJSGetMemoryData || asm.EmulatorJSGetMemoryData || mod._get_memory_data || asm._get_memory_data;
+    const fnSize = mod.EmulatorJSGetMemorySize || asm.EmulatorJSGetMemorySize || mod._get_memory_size || asm._get_memory_size || mod.retro_get_memory_size || asm.retro_get_memory_size;
 
     const knownKeys = [
       "RETRO_MEMORY_SYSTEM_RAM",
@@ -98,6 +262,13 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
             } else if (typeof res === "object" && (res.buffer || res.pointer)) {
               ptr = res.byteOffset || res.pointer || 0;
               sz = res.byteLength || res.size || 0x80000;
+            }
+
+            if (typeof fnSize === "function" && strKey === "RETRO_MEMORY_SYSTEM_RAM") {
+              const actualSz = fnSize(2);
+              if (typeof actualSz === "number" && actualSz > 0) {
+                sz = actualSz;
+              }
             }
 
             if (ptr > 0 || (typeof res === "object" && res)) {
@@ -125,6 +296,8 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
       console.log(`Tested ${knownKeys.length} known Libretro memory key constants. Awaiting key match...`);
     }
     console.groupEnd();
+
+    this.probeLibretroMemoryMap();
 
     if (this.isResolvedState) {
       this.dumpGameBoyHRAMDiagnostic();
@@ -186,13 +359,26 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     console.groupEnd();
   }
 
-  public readByte(address: number, bit?: number | null): number {
+  public readByte(address: number, bit?: number | null, realAddress?: number): number {
     if (!this.isResolvedState) return 0;
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     const heap = mod?.HEAPU8;
-    const ptr = this.ramOffset + address;
-    if (!heap || ptr >= heap.length) return 0;
+    if (!heap) return 0;
+
+    let ptr = 0;
+    if (this.parsedMemoryMap && realAddress !== undefined) {
+      const resolved = resolveDescriptorAddress(this.parsedMemoryMap, realAddress);
+      if (resolved) {
+        ptr = resolved.wasmPointer;
+      }
+    }
+
+    if (ptr === 0) {
+      ptr = this.ramOffset + address;
+    }
+
+    if (ptr >= heap.length) return 0;
     let val = heap[ptr];
     if (bit !== undefined && bit !== null && bit >= 0 && bit <= 7) {
       val = (val >> bit) & 1;
@@ -200,23 +386,49 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     return val;
   }
 
-  public readWord(address: number, isDelta?: boolean, endian: "little" | "big" = "little"): number {
+  public readWord(address: number, isDelta?: boolean, endian: "little" | "big" = "little", realAddress?: number): number {
     if (!this.isResolvedState) return 0;
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     const heap = mod?.HEAPU8;
-    const ptr = this.ramOffset + address;
-    if (!heap || ptr + 1 >= heap.length) return 0;
+    if (!heap) return 0;
+
+    let ptr = 0;
+    if (this.parsedMemoryMap && realAddress !== undefined) {
+      const resolved = resolveDescriptorAddress(this.parsedMemoryMap, realAddress);
+      if (resolved) {
+        ptr = resolved.wasmPointer;
+      }
+    }
+
+    if (ptr === 0) {
+      ptr = this.ramOffset + address;
+    }
+
+    if (ptr + 1 >= heap.length) return 0;
     return endian === "little" ? heap[ptr] | (heap[ptr + 1] << 8) : (heap[ptr] << 8) | heap[ptr + 1];
   }
 
-  public readDword(address: number, isDelta?: boolean, endian: "little" | "big" = "little"): number {
+  public readDword(address: number, isDelta?: boolean, endian: "little" | "big" = "little", realAddress?: number): number {
     if (!this.isResolvedState) return 0;
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     const heap = mod?.HEAPU8;
-    const ptr = this.ramOffset + address;
-    if (!heap || ptr + 3 >= heap.length) return 0;
+    if (!heap) return 0;
+
+    let ptr = 0;
+    if (this.parsedMemoryMap && realAddress !== undefined) {
+      const resolved = resolveDescriptorAddress(this.parsedMemoryMap, realAddress);
+      if (resolved) {
+        ptr = resolved.wasmPointer;
+      }
+    }
+
+    if (ptr === 0) {
+      ptr = this.ramOffset + address;
+    }
+
+    if (ptr + 3 >= heap.length) return 0;
     return endian === "little"
       ? (heap[ptr] | (heap[ptr + 1] << 8) | (heap[ptr + 2] << 16) | (heap[ptr + 3] << 24)) >>> 0
       : ((heap[ptr] << 24) | (heap[ptr + 1] << 16) | (heap[ptr + 2] << 8) | heap[ptr + 3]) >>> 0;
