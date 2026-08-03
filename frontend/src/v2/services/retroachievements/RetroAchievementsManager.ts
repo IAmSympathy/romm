@@ -242,7 +242,7 @@ export class RetroAchievementsManager {
       this.addNotification(
         "game_detected",
         gameTitle,
-        `${unlockedCount} / ${totalCount} achievements débloqués (${percent}%)`,
+        `${unlockedCount} / ${totalCount} succès débloqués (${percent}%)`,
         {
           badgeUrl: setImageUrl,
           icon: "mdi-check-decagram",
