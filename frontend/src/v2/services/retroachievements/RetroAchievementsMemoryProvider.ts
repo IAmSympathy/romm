@@ -1,14 +1,132 @@
 export interface MemoryRegion {
-  name: string;
-  startAddress: number;
-  endAddress: number;
+  source: string;
+  cpuStart: number;
+  cpuEnd: number;
   wasmPointer: number;
   size: number;
 }
 
+export class MemoryRegionResolver {
+  public regions: MemoryRegion[] = [];
+  public unmappedAddressesCount: Map<number, number> = new Map();
+  private loggedUnmappedSet: Set<number> = new Set();
+
+  public registerRegion(region: MemoryRegion) {
+    this.regions.push(region);
+    console.log(
+      `%c[RA MemoryRegionResolver] Registered region "${region.source}": CPU 0x${region.cpuStart.toString(16).toUpperCase()}-0x${region.cpuEnd.toString(16).toUpperCase()} -> WASM 0x${region.wasmPointer.toString(16).toUpperCase()} (${region.size} bytes)`,
+      "color: #10b981; font-weight: bold;"
+    );
+  }
+
+  public clear() {
+    this.regions = [];
+    this.unmappedAddressesCount.clear();
+    this.loggedUnmappedSet.clear();
+  }
+
+  public resolveWasmPointer(cpuAddress: number): { wasmPointer: number; region: MemoryRegion | null; isUnmapped: boolean } {
+    for (const reg of this.regions) {
+      if (cpuAddress >= reg.cpuStart && cpuAddress <= reg.cpuEnd) {
+        const offset = cpuAddress - reg.cpuStart;
+        if (offset >= 0 && offset < reg.size) {
+          return { wasmPointer: reg.wasmPointer + offset, region: reg, isUnmapped: false };
+        }
+      }
+    }
+
+    if (!this.loggedUnmappedSet.has(cpuAddress)) {
+      this.loggedUnmappedSet.add(cpuAddress);
+      const addrHex = `0x${cpuAddress.toString(16).toUpperCase().padStart(4, "0")}`;
+      console.warn(`[RA Unmapped Memory] CPU address ${addrHex} is UNMAPPED (no matching memory region). Returning 0.`);
+    }
+    const count = this.unmappedAddressesCount.get(cpuAddress) || 0;
+    this.unmappedAddressesCount.set(cpuAddress, count + 1);
+
+    return { wasmPointer: -1, region: null, isUnmapped: true };
+export class GambatteHRAMResolver {
+  public name = "Gambatte Core HRAM Resolver";
+
+  public resolveHRAM(ramOffset: number, ramSize: number, heap: Uint8Array, mod: any): MemoryRegion | null {
+    if (ramOffset <= 0 || !heap) return null;
+
+    console.group("%c[RA Gambatte HRAM Resolver Diagnostic]", "color: #ec4899; font-weight: bold; font-size: 14px;");
+
+    let foundPtr = 0;
+    let foundSource = "";
+
+    // 1. Inspect WASM module exports & symbols
+    const asm = mod?.asm || mod?.wasmExports || {};
+    const searchKeys = ["_hram", "hram", "_hram_", "_io_ram", "_gambatte_hram", "hram_"];
+    for (const key of searchKeys) {
+      const sym = mod?.[key] || asm?.[key];
+      if (typeof sym === "number" && sym > 0 && sym < heap.length) {
+        foundPtr = sym;
+        foundSource = `WASM Symbol (${key})`;
+        break;
+      }
+    }
+
+    // 2. Scan contiguous C++ struct allocations relative to WRAM (ramOffset)
+    if (foundPtr === 0) {
+      const candidateOffsets = [
+        { offset: ramOffset + 8192, label: "WRAM + 8192 (0x2000 offset)" },
+        { offset: ramOffset + 32768, label: "WRAM + 32768 (0x8000 offset)" },
+        { offset: ramOffset + 0x3f80, label: "WRAM + 0x3F80 offset" },
+        { offset: ramOffset - 128, label: "WRAM - 128 offset" }
+      ];
+
+      for (const cand of candidateOffsets) {
+        if (cand.offset > 0 && cand.offset + 127 < heap.length) {
+          let nonFF = 0;
+          let nonZero = 0;
+          for (let i = 0; i < 127; i++) {
+            const b = heap[cand.offset + i];
+            if (b !== 0xff) nonFF++;
+            if (b !== 0x00) nonZero++;
+          }
+          if (nonFF > 0 && nonZero > 0) {
+            foundPtr = cand.offset;
+            foundSource = cand.label;
+            break;
+          }
+        }
+      }
+    }
+
+    if (foundPtr > 0) {
+      const sampleBytes: string[] = [];
+      for (let b = 0; b < 16 && foundPtr + b < heap.length; b++) {
+        sampleBytes.push(heap[foundPtr + b].toString(16).toUpperCase().padStart(2, "0"));
+      }
+
+      console.log("%cStatus:", "font-weight: bold; color: #10b981;", "FOUND");
+      console.log("%cWASM Pointer:", "font-weight: bold;", `0x${foundPtr.toString(16).toUpperCase()} (${foundPtr})`);
+      console.log("%cSource / Method:", "font-weight: bold;", foundSource);
+      console.log("%cSize:", "font-weight: bold;", "127 bytes");
+      console.log("%cSample Bytes (first 16):", "font-weight: bold;", sampleBytes.join(" "));
+      console.groupEnd();
+
+      return {
+        source: `Gambatte HRAM (${foundSource})`,
+        cpuStart: 0xff80,
+        cpuEnd: 0xfffe,
+        wasmPointer: foundPtr,
+        size: 127
+      };
+    }
+
+    console.log("%cStatus:", "font-weight: bold; color: #ef4444;", "NOT FOUND");
+    console.log("No valid HRAM memory structure found near WRAM pointer 0x" + ramOffset.toString(16).toUpperCase());
+    console.groupEnd();
+
+    return null;
+  }
+}
+
 export interface IMemoryProvider {
   name: string;
-  regions?: MemoryRegion[];
+  resolver?: MemoryRegionResolver;
   isAvailable(): boolean;
   resolve(): boolean;
   readByte(address: number, bit?: number | null, realAddress?: number): number;
@@ -266,7 +384,7 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
   public isResolvedState: boolean = false;
   public activeFnName: string = "";
   public parsedMemoryMap: RetroMemoryMap | null = null;
-  public regions: MemoryRegion[] = [];
+  public resolver: MemoryRegionResolver = new MemoryRegionResolver();
   public hramReadCount: number = 0;
   public hramUniqueAddresses: Set<number> = new Set();
   public hramSampleValues: Map<number, number> = new Map();
@@ -319,6 +437,9 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     if (mmapPtr > 0 && !this.parsedMemoryMap) {
       this.parsedMemoryMap = parseWasmMemoryMap(mmapPtr, heap);
     }
+
+    const fnToTest = mod.EmulatorJSGetMemoryData || asm.EmulatorJSGetMemoryData || mod._get_memory_data || asm._get_memory_data;
+    const fnSize = mod.EmulatorJSGetMemorySize || asm.EmulatorJSGetMemorySize || mod._get_memory_size || asm._get_memory_size || mod.retro_get_memory_size || asm.retro_get_memory_size;
 
     const probedResults: { id: number; method: string; ptr: number; size: number; first32Hex: string; last32Hex: string }[] = [];
 
@@ -452,10 +573,78 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
                 this.isResolvedState = true;
                 this.activeFnName = `EmulatorJSGetMemoryData("${strKey}")`;
 
-                this.regions = [
-                  { name: "WRAM (0xC000-0xDFFF)", startAddress: 0xc000, endAddress: 0xdfff, wasmPointer: ptr, size: 0x2000 },
-                  { name: "Echo RAM (0xE000-0xFDFF)", startAddress: 0xe000, endAddress: 0xfdff, wasmPointer: ptr, size: 0x1e00 }
-                ];
+                this.resolver.clear();
+                const core = ((window as any).EJS_core || "").toLowerCase();
+
+                if (core.includes("gb") || core.includes("gambatte") || core.includes("sameboy") || core.includes("gearboy")) {
+                  this.resolver.registerRegion({
+                    source: "Game Boy WRAM (0xC000-0xDFFF)",
+                    cpuStart: 0xc000,
+                    cpuEnd: 0xdfff,
+                    wasmPointer: ptr,
+                    size: Math.min(sz, 8192)
+                  });
+                  this.resolver.registerRegion({
+                    source: "Game Boy Echo RAM (0xE000-0xFDFF)",
+                    cpuStart: 0xe000,
+                    cpuEnd: 0xfdff,
+                    wasmPointer: ptr,
+                    size: Math.min(sz, 7680)
+                  });
+
+                  // Execute Gambatte HRAM Resolver
+                  const gambatteResolver = new GambatteHRAMResolver();
+                  const hramReg = gambatteResolver.resolveHRAM(ptr, sz, mod.HEAPU8, mod);
+                  if (hramReg) {
+                    this.resolver.registerRegion(hramReg);
+                  }
+                } else if (core.includes("nes") || core.includes("fceumm") || core.includes("nestopia") || core.includes("mesen")) {
+                  this.resolver.registerRegion({
+                    source: "NES Internal RAM (0x0000-0x07FF)",
+                    cpuStart: 0x0000,
+                    cpuEnd: 0x07ff,
+                    wasmPointer: ptr,
+                    size: Math.min(sz, 2048)
+                  });
+                  this.resolver.registerRegion({
+                    source: "NES RAM Mirror (0x0800-0x1FFF)",
+                    cpuStart: 0x0800,
+                    cpuEnd: 0x1fff,
+                    wasmPointer: ptr,
+                    size: Math.min(sz, 2048)
+                  });
+                } else if (core.includes("snes") || core.includes("bsnes")) {
+                  this.resolver.registerRegion({
+                    source: "SNES WRAM (0x7E0000-0x7FFFFF)",
+                    cpuStart: 0x7e0000,
+                    cpuEnd: 0x7fffff,
+                    wasmPointer: ptr,
+                    size: Math.min(sz, 131072)
+                  });
+                  this.resolver.registerRegion({
+                    source: "SNES Low WRAM (0x0000-0x1FFF)",
+                    cpuStart: 0x0000,
+                    cpuEnd: 0x1fff,
+                    wasmPointer: ptr,
+                    size: Math.min(sz, 8192)
+                  });
+                } else if (core.includes("sega") || core.includes("genesis") || core.includes("megadrive") || core.includes("picodrive")) {
+                  this.resolver.registerRegion({
+                    source: "Genesis System RAM (0x0000-0xFFFF)",
+                    cpuStart: 0x0000,
+                    cpuEnd: 0xffff,
+                    wasmPointer: ptr,
+                    size: Math.min(sz, 65536)
+                  });
+                } else {
+                  this.resolver.registerRegion({
+                    source: `System RAM (${this.activeFnName})`,
+                    cpuStart: 0x0000,
+                    cpuEnd: sz - 1,
+                    wasmPointer: ptr,
+                    size: sz
+                  });
+                }
               }
             }
           }
@@ -479,15 +668,16 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     this.probeLibretroMemoryMap();
 
     if (this.parsedMemoryMap && this.parsedMemoryMap.descriptors) {
-      const hramDesc = this.parsedMemoryMap.descriptors.find(d => d.start === 0xff80 || (0xff80 >= d.start && 0xff80 < d.start + d.len));
-      if (hramDesc && hramDesc.ptr > 0) {
-        this.regions.push({
-          name: "HRAM (0xFF80-0xFFFE)",
-          startAddress: hramDesc.start,
-          endAddress: hramDesc.start + hramDesc.len - 1,
-          wasmPointer: hramDesc.ptr + hramDesc.offset,
-          size: hramDesc.len
-        });
+      for (const desc of this.parsedMemoryMap.descriptors) {
+        if (desc.ptr > 0 && desc.len > 0) {
+          this.resolver.registerRegion({
+            source: `retro_memory_map (${desc.addrspace || "Descriptor"})`,
+            cpuStart: desc.start,
+            cpuEnd: desc.start + desc.len - 1,
+            wasmPointer: desc.ptr + desc.offset,
+            size: desc.len
+          });
+        }
       }
     }
 
@@ -517,24 +707,14 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     for (const addr of testAddresses) {
       const addrHex = `0x${addr.toString(16).toUpperCase().padStart(4, "0")}`;
 
-      const off1 = addr >= 0xc000 ? addr - 0xc000 : addr;
-      const off2 = addr & 0x1fff;
-      const off3 = 0x2000 + (addr >= 0xff80 ? addr - 0xff80 : 0);
-      const off4 = 0x3f80 + (addr >= 0xff80 ? addr - 0xff80 : 0);
-
-      const readSafe = (off: number) => {
-        const ptr = this.ramOffset + off;
-        return ptr >= 0 && ptr < heap.length ? heap[ptr] : "OOB";
-      };
+      const res = this.resolver.resolveWasmPointer(addr);
+      const val = !res.isUnmapped && res.wasmPointer >= 0 && res.wasmPointer < heap.length ? heap[res.wasmPointer] : "UNMAPPED";
 
       tableData.push({
         "CPU Address": addrHex,
-        "Current Offset": `0x${off1.toString(16).toUpperCase()} (${off1})`,
-        "Current Value": readSafe(off1),
-        "Alt 1: (addr - 0xC000)": `off: 0x${off1.toString(16).toUpperCase()} => val: ${readSafe(off1)}`,
-        "Alt 2: (addr & 0x1FFF)": `off: 0x${off2.toString(16).toUpperCase()} => val: ${readSafe(off2)}`,
-        "Alt 3: 0x2000 + (addr - 0xFF80)": `off: 0x${off3.toString(16).toUpperCase()} => val: ${readSafe(off3)}`,
-        "Alt 4: 0x3F80 + (addr - 0xFF80)": `off: 0x${off4.toString(16).toUpperCase()} => val: ${readSafe(off4)}`,
+        "Resolved WASM Pointer": res.wasmPointer >= 0 ? `0x${res.wasmPointer.toString(16).toUpperCase()}` : "UNMAPPED",
+        "Matched Region": res.region ? res.region.source : "None",
+        "Value": val,
       });
     }
 
@@ -591,32 +771,38 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     if (!heap) return 0;
 
     const targetAddr = realAddress !== undefined ? realAddress : address;
-    let ptr = 0;
-    let provId = "RETRO_MEMORY_SYSTEM_RAM (ID 2)";
+    let ptr = -1;
 
     if (this.parsedMemoryMap && targetAddr !== undefined) {
-      const resolved = resolveDescriptorAddress(this.parsedMemoryMap, targetAddr);
-      if (resolved) {
-        ptr = resolved.wasmPointer;
-        provId = `retro_memory_map desc (start: 0x${resolved.desc.start.toString(16).toUpperCase()})`;
+      const resolvedDesc = resolveDescriptorAddress(this.parsedMemoryMap, targetAddr);
+      if (resolvedDesc) {
+        ptr = resolvedDesc.wasmPointer;
       }
     }
 
-    if (ptr === 0 && this.regions.length > 0 && targetAddr !== undefined) {
-      const matchedRegion = this.regions.find(
-        (r) => targetAddr >= r.startAddress && targetAddr <= r.endAddress
-      );
-      if (matchedRegion) {
-        ptr = matchedRegion.wasmPointer + (targetAddr - matchedRegion.startAddress);
-        provId = `Multi-Region: ${matchedRegion.name}`;
+    if (ptr < 0 && targetAddr !== undefined) {
+      const res = this.resolver.resolveWasmPointer(targetAddr);
+      if (!res.isUnmapped && res.wasmPointer >= 0) {
+        ptr = res.wasmPointer;
       }
     }
 
-    if (ptr === 0) {
-      ptr = this.ramOffset + address;
+    if (ptr < 0 || ptr >= heap.length) {
+      if (targetAddr >= 0xff80 && targetAddr <= 0xfffe) {
+        this.hramReadCount++;
+        this.hramUniqueAddresses.add(targetAddr);
+        this.hramSampleValues.set(targetAddr, 0);
+
+        if (this.hramReadCount % 5000 === 0) {
+          console.group(`%c[RA HRAM Stats - ${this.hramReadCount} Reads (UNMAPPED HRAM)]`, "color: #ef4444; font-weight: bold; font-size: 13px;");
+          console.log("%cTotal HRAM reads:", "font-weight: bold;", this.hramReadCount);
+          console.log("%cUnique HRAM addresses:", "font-weight: bold;", this.hramUniqueAddresses.size);
+          console.groupEnd();
+        }
+      }
+      return 0;
     }
 
-    if (ptr >= heap.length || ptr < 0) return 0;
     let val = heap[ptr];
     if (bit !== undefined && bit !== null && bit >= 0 && bit <= 7) {
       val = (val >> bit) & 1;
@@ -651,29 +837,23 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     if (!heap) return 0;
 
     const targetAddr = realAddress !== undefined ? realAddress : address;
-    let ptr = 0;
+    let ptr = -1;
 
     if (this.parsedMemoryMap && targetAddr !== undefined) {
-      const resolved = resolveDescriptorAddress(this.parsedMemoryMap, targetAddr);
-      if (resolved) {
-        ptr = resolved.wasmPointer;
+      const resolvedDesc = resolveDescriptorAddress(this.parsedMemoryMap, targetAddr);
+      if (resolvedDesc) {
+        ptr = resolvedDesc.wasmPointer;
       }
     }
 
-    if (ptr === 0 && this.regions.length > 0 && targetAddr !== undefined) {
-      const matchedRegion = this.regions.find(
-        (r) => targetAddr >= r.startAddress && targetAddr <= r.endAddress
-      );
-      if (matchedRegion) {
-        ptr = matchedRegion.wasmPointer + (targetAddr - matchedRegion.startAddress);
+    if (ptr < 0 && targetAddr !== undefined) {
+      const res = this.resolver.resolveWasmPointer(targetAddr);
+      if (!res.isUnmapped && res.wasmPointer >= 0) {
+        ptr = res.wasmPointer;
       }
     }
 
-    if (ptr === 0) {
-      ptr = this.ramOffset + address;
-    }
-
-    if (ptr + 1 >= heap.length || ptr < 0) return 0;
+    if (ptr < 0 || ptr + 1 >= heap.length) return 0;
     return endian === "little" ? heap[ptr] | (heap[ptr + 1] << 8) : (heap[ptr] << 8) | heap[ptr + 1];
   }
 
@@ -685,29 +865,23 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     if (!heap) return 0;
 
     const targetAddr = realAddress !== undefined ? realAddress : address;
-    let ptr = 0;
+    let ptr = -1;
 
     if (this.parsedMemoryMap && targetAddr !== undefined) {
-      const resolved = resolveDescriptorAddress(this.parsedMemoryMap, targetAddr);
-      if (resolved) {
-        ptr = resolved.wasmPointer;
+      const resolvedDesc = resolveDescriptorAddress(this.parsedMemoryMap, targetAddr);
+      if (resolvedDesc) {
+        ptr = resolvedDesc.wasmPointer;
       }
     }
 
-    if (ptr === 0 && this.regions.length > 0 && targetAddr !== undefined) {
-      const matchedRegion = this.regions.find(
-        (r) => targetAddr >= r.startAddress && targetAddr <= r.endAddress
-      );
-      if (matchedRegion) {
-        ptr = matchedRegion.wasmPointer + (targetAddr - matchedRegion.startAddress);
+    if (ptr < 0 && targetAddr !== undefined) {
+      const res = this.resolver.resolveWasmPointer(targetAddr);
+      if (!res.isUnmapped && res.wasmPointer >= 0) {
+        ptr = res.wasmPointer;
       }
     }
 
-    if (ptr === 0) {
-      ptr = this.ramOffset + address;
-    }
-
-    if (ptr + 3 >= heap.length || ptr < 0) return 0;
+    if (ptr < 0 || ptr + 3 >= heap.length) return 0;
     return endian === "little"
       ? (heap[ptr] | (heap[ptr + 1] << 8) | (heap[ptr + 2] << 16) | (heap[ptr + 3] << 24)) >>> 0
       : ((heap[ptr] << 24) | (heap[ptr + 1] << 16) | (heap[ptr + 2] << 8) | heap[ptr + 3]) >>> 0;
