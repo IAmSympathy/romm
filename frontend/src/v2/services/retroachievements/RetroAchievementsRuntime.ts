@@ -1,6 +1,7 @@
 import userApi from "@/services/api/user";
 import { RAMemoryReader } from "./RAMemoryReader";
-import { RATriggerParser, type RATrigger } from "./RATriggerParser";
+import { RCheevosEngine } from "./RCheevosEngine";
+import { RCTriggerState, type RCTrigger } from "./RCheevosTypes";
 
 export interface MonitoredAchievement {
   id: number;
@@ -8,7 +9,7 @@ export interface MonitoredAchievement {
   points: number;
   badgeUrl?: string;
   triggerStr: string;
-  trigger: RATrigger | null;
+  trigger: RCTrigger | null;
   unlocked: boolean;
 }
 
@@ -19,7 +20,6 @@ export class RetroAchievementsRuntime {
   public gameId: number | null = null;
   public isRunning: boolean = false;
   private animFrameId: number | null = null;
-  private checkFrequencyHz: number = 60; // 60 Hz frame-synchronous evaluation (16.6ms)
   public onUnlockCallback?: (achievement: MonitoredAchievement) => void;
 
   private warmupTicks: number = 0;
@@ -48,7 +48,7 @@ export class RetroAchievementsRuntime {
   }
 
   /**
-   * Load and parse achievements list, deduplicating any duplicate achievement IDs.
+   * Load and parse achievements list, strictly deduplicating any duplicate achievement IDs.
    */
   public loadAchievements(rawAchievements: any[]) {
     this.achievements = [];
@@ -63,18 +63,18 @@ export class RetroAchievementsRuntime {
   }
 
   /**
-   * Parse a single achievement entry into a MonitoredAchievement.
+   * Parse a single achievement entry into a MonitoredAchievement using official RCheevosEngine.
    */
   public parseAchievement(raw: any): MonitoredAchievement {
     const triggerStr = raw.MemAddr || raw.conditions || raw.trigger || "";
-    let parsedTrigger: RATrigger | null = null;
+    let parsedTrigger: RCTrigger | null = null;
 
     try {
       if (triggerStr) {
-        parsedTrigger = RATriggerParser.parseTrigger(triggerStr);
+        parsedTrigger = RCheevosEngine.parseTrigger(triggerStr);
       }
     } catch (err) {
-      console.warn(`[RA Runtime] Failed to parse trigger for achievement ${raw.id}:`, err);
+      console.warn(`[RA Runtime] Failed to parse rcheevos trigger for achievement ${raw.id}:`, err);
     }
 
     return {
@@ -105,7 +105,7 @@ export class RetroAchievementsRuntime {
 
     this.memoryReader.raMemory.resolveMemory(core);
 
-    console.group("%c[RA Runtime 60Hz Engine]", "color: #22c55e; font-weight: bold; font-size: 14px;");
+    console.group("%c[RA rcheevos 60Hz Engine]", "color: #22c55e; font-weight: bold; font-size: 14px;");
     console.log("%cGame ID:", "font-weight: bold;", this.gameId);
     console.log("%cCore:", "font-weight: bold;", core);
     console.log("%cAchievements loaded (deduped):", "font-weight: bold;", this.achievements.length);
@@ -135,24 +135,12 @@ export class RetroAchievementsRuntime {
   /**
    * Real-time memory read abstraction wrapper.
    */
-  public readMemory(address: number, size: 1 | 2 | 4 = 1, isDelta: boolean = false, isPrior: boolean = false): number {
-    return this.memoryReader.readMemory(address, size, null, isDelta, isPrior);
+  public readMemory(address: number, size: 1 | 2 | 4 = 1): number {
+    return this.memoryReader.readMemory(address, size);
   }
 
   /**
-   * Detect if NES Super Mario Bros or core game is in Title / Demo Mode.
-   */
-  public isDemoModeActive(): boolean {
-    const core = ((window as any).EJS_core || "fceumm").toLowerCase();
-    if (core.includes("fceumm") || core.includes("nestopia") || core.includes("nes")) {
-      const gameState = this.readMemory(0x0770, 1);
-      if (gameState === 0) return true;
-    }
-    return false;
-  }
-
-  /**
-   * Evaluate active achievements frame by frame against core RAM.
+   * Evaluate active achievements frame by frame using official RCheevosEngine.
    */
   public evaluateAchievements() {
     if (!this.isRunning) return;
@@ -193,16 +181,14 @@ export class RetroAchievementsRuntime {
       }
     }
 
-    const demoDetected = this.isDemoModeActive();
     const shouldLogDiagnostic = this.frameIndex % 300 === 0;
 
     if (shouldLogDiagnostic) {
-      console.groupCollapsed(`%c[RA Evaluation Frequency] Frame #${this.frameIndex}`, "color: #3b82f6; font-weight: bold;");
+      console.groupCollapsed(`%c[RA rcheevos Evaluation] Frame #${this.frameIndex}`, "color: #3b82f6; font-weight: bold;");
       console.log("%c[RA Frequency Stats]", "color: #06b6d4; font-weight: bold;", {
         "Current frame": this.frameIndex,
         "Checks per second": `${this.checksPerSecond.toFixed(1)} Hz`,
         "Last evaluation time": `${this.lastEvaluationMs.toFixed(3)} ms`,
-        "Demo State Active": demoDetected ? "YES (Attract Mode)" : "NO (In-Game)",
       });
 
       const activeList = this.achievements.filter((a) => !a.unlocked);
@@ -216,29 +202,14 @@ export class RetroAchievementsRuntime {
     for (const ach of activeList) {
       if (!ach.trigger) continue;
 
-      const isSatisfied = RATriggerParser.evaluateTrigger(ach.trigger, this.memoryReader);
+      const evalResult = RCheevosEngine.evaluateTrigger(ach.trigger, this.memoryReader);
 
-      if (isSatisfied) {
-        const coreResult = RATriggerParser.evaluateGroup(
-          ach.trigger.coreGroup,
-          this.memoryReader,
-          [ach.trigger.coreGroup, ...ach.trigger.altGroups]
-        );
-
+      if (evalResult === RCTriggerState.RC_TRIGGER_STATE_TRIGGERED) {
         console.group("%c[RA Achievement Evaluation — UNLOCK DETECTED]", "color: #22c55e; font-weight: bold; font-size: 14px;");
         console.log("%cAchievement:", "font-weight: bold;", ach.title);
         console.log("%cFrame:", "font-weight: bold;", this.frameIndex);
         console.log("%cTrigger:", "font-weight: bold;", ach.triggerStr);
-        console.log("%cChecks per second:", "font-weight: bold;", `${this.checksPerSecond.toFixed(1)} Hz`);
-
-        console.group("%cRequirement Conditions Breakdown:", "color: #eab308; font-weight: bold;");
-        coreResult.reqBreakdown.forEach((c) => {
-          console.log(
-            `Requirement #${c.index} [${c.flag}] | Address: ${c.address} | Current: ${c.leftVal} ${c.operator} Expected: ${c.rightVal} | Hits: ${c.hits}/${c.targetHits} => Result: PASS`
-          );
-        });
-        console.groupEnd();
-
+        console.log("%crcheevos State:", "font-weight: bold;", "RC_TRIGGER_STATE_TRIGGERED");
         console.log("%cAction:", "font-weight: bold;", "Unlocking achievement now!");
         console.groupEnd();
 
