@@ -16,24 +16,8 @@ function buildSaveName(rom: DetailedRom): string {
 }
 
 export async function captureCanvasScreenshot(): Promise<ArrayBuffer | null> {
-  try {
-    if (window.EJS_emulator?.gameManager?.screenshot) {
-      const res = await window.EJS_emulator.gameManager.screenshot();
-      if (res instanceof ArrayBuffer) return res;
-      if (res instanceof Uint8Array) return res.buffer as ArrayBuffer;
-      if (res instanceof Blob) return await res.arrayBuffer();
-      if (typeof res === "string" && res.startsWith("data:")) {
-        const bin = atob(res.split(",")[1]);
-        const arr = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-        return arr.buffer as ArrayBuffer;
-      }
-    }
-  } catch (e) {
-    console.warn("gameManager.screenshot failed:", e);
-  }
-
-  // Fallback: grab directly from canvas in #game element
+  // The displayed canvas is the authoritative frame. EmulatorJS's internal
+  // screenshot buffer can be pre-rotation for vertical Arcade games.
   try {
     const canvas = document.querySelector("#game canvas") as HTMLCanvasElement | null;
     if (canvas && canvas.width > 0 && canvas.height > 0) {
@@ -50,7 +34,10 @@ export async function captureCanvasScreenshot(): Promise<ArrayBuffer | null> {
 export async function normalizeScreenshotBuffer(
   input?: any
 ): Promise<ArrayBuffer | null> {
-  if (!input) return await captureCanvasScreenshot();
+  const canvasScreenshot = await captureCanvasScreenshot();
+  if (canvasScreenshot) return canvasScreenshot;
+
+  if (!input) return null;
 
   if (input instanceof ArrayBuffer) return input;
   if (input instanceof Uint8Array) return input.buffer as ArrayBuffer;
@@ -62,7 +49,7 @@ export async function normalizeScreenshotBuffer(
     return arr.buffer as ArrayBuffer;
   }
 
-  return await captureCanvasScreenshot();
+  return null;
 }
 
 export function initEmulatorJSPopupObserver() {

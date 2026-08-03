@@ -26,6 +26,15 @@ type DetailedRom = DetailedRomSchema;
 type SimpleRom = SimpleRomSchema;
 type SearchRom = SearchRomSchema;
 
+export interface RandomRom {
+  id: number;
+  name: string | null;
+  fs_name: string;
+  platform_slug: string;
+  platform_display_name: string;
+  cover_url: string;
+}
+
 const DOWNLOAD_CLEANUP_DELAY = 100;
 const UPLOAD_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB per chunk
 const MAX_CHUNK_RETRIES = 3;
@@ -413,6 +422,10 @@ async function getRomSimple({
   // for the v2 gallery card's per-card fetch path. Detail-level data is
   // pulled on demand (game details page, quick-note dialog open).
   return api.get<SimpleRom>(`/roms/${romId}/simple`, { signal });
+}
+
+async function getRandomRom() {
+  return api.get<RandomRom>("/roms/random");
 }
 
 async function getRomByMetadataProvider({
@@ -924,6 +937,7 @@ export default {
   getRecentPlayedRoms,
   getRom,
   getRomSimple,
+  getRandomRom,
   getRomByMetadataProvider,
   downloadRom,
   bulkDownloadRoms,

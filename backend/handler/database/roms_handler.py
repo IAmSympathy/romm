@@ -1,6 +1,7 @@
 import functools
 import hashlib
 import json
+import random
 import re
 from collections.abc import Iterable, Sequence
 from datetime import datetime
@@ -1516,6 +1517,63 @@ class DBRomsHandler(DBBaseHandler):
             hidden_rom_ids=kwargs.get("hidden_rom_ids", None),
         )
         return session.scalars(roms).all()
+
+    @begin_session
+    def get_random_rom(
+        self,
+        *,
+        user_id: int,
+        hidden_platform_ids: Sequence[int] | None = None,
+        hidden_rom_ids: Sequence[int] | None = None,
+        session: Session = None,  # type: ignore
+    ) -> Rom | None:
+        """Return a visible ROM without materialising or shuffling the library.
+
+        A random point in the primary-key range lets the database seek by its
+        index. The second query only wraps at the end of the range, avoiding
+        both ``ORDER BY RAND()`` and a full ordered id list.
+        """
+        query, _ = self.get_roms_query(user_id=user_id, order_by="id")
+        query = self.filter_roms(
+            query=query,
+            user_id=user_id,
+            hidden_platform_ids=hidden_platform_ids,
+            hidden_rom_ids=hidden_rom_ids,
+            include_related=False,
+        ).order_by(None)
+
+        min_id, max_id = session.execute(
+            query.with_only_columns(func.min(Rom.id), func.max(Rom.id))  # type: ignore
+        ).one()
+        if min_id is None or max_id is None:
+            return None
+
+        pivot = random.randint(min_id, max_id)
+        row_options = (
+            load_only(
+                Rom.id,
+                Rom.platform_id,
+                Rom.name,
+                Rom.fs_name,
+                Rom.path_cover_s,
+            ),
+            selectinload(Rom.platform),
+        )
+        rom = session.scalar(
+            query.options(*row_options)
+            .where(Rom.id >= pivot)
+            .order_by(Rom.id.asc())
+            .limit(1)
+        )
+        if rom is not None:
+            return rom
+
+        return session.scalar(
+            query.options(*row_options)
+            .where(Rom.id < pivot)
+            .order_by(Rom.id.asc())
+            .limit(1)
+        )
 
     @begin_session
     def get_hidden_rom_ids_among(

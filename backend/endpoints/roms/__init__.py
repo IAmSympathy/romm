@@ -41,6 +41,7 @@ from decorators.auth import protected_route
 from endpoints.responses import BulkOperationResponse
 from endpoints.responses.rom import (
     DetailedRomSchema,
+    RandomRomSchema,
     RomFiltersDict,
     RomUserSchema,
     SimpleRomSchema,
@@ -880,6 +881,20 @@ def get_roms(
             rom_id_index=list(rom_id_index),
             filter_values=filter_values,
         )
+
+
+@protected_route(router.get, "/random", [Scope.ROMS_READ])
+def get_random_rom(request: Request) -> RandomRomSchema:
+    """Return one visible ROM using an indexed random primary-key seek."""
+    perms = get_permissions(request)
+    rom = db_rom_handler.get_random_rom(
+        user_id=request.user.id,
+        hidden_platform_ids=perms.hidden_platform_ids,
+        hidden_rom_ids=perms.hidden_rom_ids,
+    )
+    if rom is None:
+        raise RomNotFoundInDatabaseException("random")
+    return RandomRomSchema.from_rom(rom)
 
 
 @protected_route(router.get, "/identifiers", [Scope.ROMS_READ])
