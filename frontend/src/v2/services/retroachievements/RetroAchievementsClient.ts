@@ -81,8 +81,14 @@ export class RetroAchievementsClient {
         }
       }
 
-      const gameIcon = patch.Icon || patch.GameIcon || patch.ImageIcon || "";
-      const iconUrl = gameIcon ? `/api/users/ra/badge/${gameIcon.replace(/^\//, "")}.png` : undefined;
+      const rawIcon = patch.Icon || patch.GameIcon || patch.ImageIcon || patch.ImageTitle || "";
+      let iconUrl: string | undefined = undefined;
+      if (rawIcon) {
+        const cleanIcon = String(rawIcon).replace(/^\//, "").replace(/^Images\//, "Images_");
+        iconUrl = `/api/users/ra/badge/${cleanIcon}${cleanIcon.endsWith(".png") ? "" : ".png"}`;
+      } else if (achievements.length > 0 && achievements[0].badgeUrl) {
+        iconUrl = achievements[0].badgeUrl;
+      }
 
       return {
         gameId: Number(patch.ID || gameId),

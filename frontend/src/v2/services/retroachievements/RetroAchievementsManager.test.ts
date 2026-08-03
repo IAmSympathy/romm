@@ -90,6 +90,30 @@ describe("RetroAchievementsManager Notification Logic", () => {
     expect(gameNotif?.subtitle).toBe("1 / 2 achievements débloqués (50%)");
   });
 
+  it("prevents duplicate set detection notifications for the same session", async () => {
+    (mockClient.getGameIdByHash as any).mockResolvedValue(200);
+    (mockClient.getPatchData as any).mockResolvedValue({
+      gameId: 200,
+      title: "Super Mario World",
+      iconUrl: "/api/users/ra/badge/123.png",
+      achievements: [
+        { id: 1, title: "Ach 1", description: "Desc 1", points: 5, badgeName: "b1", unlocked: false },
+      ],
+    });
+    (mockClient.getUnlocks as any).mockResolvedValue(new Set());
+
+    const user = { id: 1, ra_username: "PlayerOne", ra_token: "secret_token" };
+    const rom = { id: 10, name: "Super Mario World", files: [{ md5_hash: "12345" }] };
+
+    await manager.initializeSession(user, rom);
+    const countAfterFirst = manager.notifications.value.filter((n) => n.type === "game_detected").length;
+    expect(countAfterFirst).toBe(1);
+
+    await manager.initializeSession(user, rom);
+    const countAfterSecond = manager.notifications.value.filter((n) => n.type === "game_detected").length;
+    expect(countAfterSecond).toBe(1);
+  });
+
   it("formats achievement unlock notification correctly without points in title", () => {
     manager.activePatch.value = {
       gameId: 200,

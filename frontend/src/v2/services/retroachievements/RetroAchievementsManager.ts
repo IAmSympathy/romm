@@ -39,6 +39,9 @@ export interface SessionUserInput {
 export class RetroAchievementsManager {
   private client: RetroAchievementsClient;
   private completionTriggered = false;
+  public detectedGames = new Set<number>();
+  public notifiedAchievementSets = new Set<number>();
+  public loadedSetImages = new Map<number, string>();
   public notifications = ref<RANotificationItem[]>([]);
   public activePatch = ref<RAPatchData | null>(null);
   public gameId = ref<number | null>(null);
@@ -98,7 +101,16 @@ export class RetroAchievementsManager {
     user: SessionUserInput | null,
     rom: SessionRomInput,
   ): Promise<boolean> {
+    // If this ROM & set has already been initialized and notified, avoid duplicate execution
+    if (rom?.id && this.detectedGames.has(rom.id) && this.gameId.value && this.notifiedAchievementSets.has(this.gameId.value)) {
+      return true;
+    }
+
     this.reset();
+
+    if (rom?.id) {
+      this.detectedGames.add(rom.id);
+    }
 
     const username = user?.ra_username?.trim();
     const token = user?.ra_token?.trim();
@@ -211,16 +223,32 @@ export class RetroAchievementsManager {
     };
     raRuntime.start();
 
-    // 4. Active achievement set notification
-    this.addNotification(
-      "game_detected",
-      gameTitle,
-      `${unlockedCount} / ${totalCount} achievements débloqués (${percent}%)`,
-      {
-        badgeUrl: patch.iconUrl || patch.achievements[0]?.badgeUrl,
-        icon: "mdi-check-decagram",
-      },
-    );
+    // 4. Active achievement set notification (Guaranteed ONCE per set ID)
+    if (!this.notifiedAchievementSets.has(resolvedGameId)) {
+      this.notifiedAchievementSets.add(resolvedGameId);
+
+      const setImageUrl = patch.iconUrl || (patch.achievements && patch.achievements[0]?.badgeUrl) || undefined;
+      if (setImageUrl) {
+        this.loadedSetImages.set(resolvedGameId, setImageUrl);
+      }
+
+      // Diagnostic log (Requirement 3)
+      console.group("%c[RA Set Detection]", "color: #22c55e; font-weight: bold; font-size: 14px;");
+      console.log("%cGame:", "font-weight: bold;", gameTitle);
+      console.log("%cSet ID:", "font-weight: bold;", resolvedGameId);
+      console.log("%cImage URL utilisée:", "font-weight: bold;", setImageUrl || "Aucune (Fallback icône local)");
+      console.groupEnd();
+
+      this.addNotification(
+        "game_detected",
+        gameTitle,
+        `${unlockedCount} / ${totalCount} achievements débloqués (${percent}%)`,
+        {
+          badgeUrl: setImageUrl,
+          icon: "mdi-check-decagram",
+        },
+      );
+    }
 
     return true;
   }
@@ -276,6 +304,9 @@ export class RetroAchievementsManager {
     this.credentials.value = null;
     this.isInitialized.value = false;
     this.completionTriggered = false;
+    this.detectedGames.clear();
+    this.notifiedAchievementSets.clear();
+    this.loadedSetImages.clear();
   }
 }
 

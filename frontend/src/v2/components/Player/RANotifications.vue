@@ -14,6 +14,20 @@ const emit = defineEmits<{
 function onDismiss(id: string) {
   emit("dismiss", id);
 }
+
+function onImgLoad(item: RANotificationItem) {
+  if (item.type === "game_detected") {
+    console.log(`%c[RA Set Detection] Image chargée: SUCCESS (${item.badgeUrl})`, "color: #22c55e; font-weight: bold;");
+  }
+}
+
+function onImgError(item: RANotificationItem) {
+  if (item.type === "game_detected") {
+    console.warn(`[RA Set Detection] Image chargée: FAILED (${item.badgeUrl})`);
+  }
+  // Clear broken badgeUrl to gracefully fall back to clean local v-icon without repeating broken requests
+  item.badgeUrl = undefined;
+}
 </script>
 
 <template>
@@ -32,7 +46,8 @@ function onDismiss(id: string) {
             :src="item.badgeUrl"
             class="r-ra-notif-card__badge"
             alt=""
-            @error="(e: Event) => ((e.target as HTMLImageElement).src = '/assets/romm/resources/metadata_providers/ra.png')"
+            @load="onImgLoad(item)"
+            @error="onImgError(item)"
           />
           <v-icon
             v-else-if="item.type === 'auth_success'"
