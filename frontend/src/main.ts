@@ -10,6 +10,7 @@ import "@/styles/common.css";
 import "@/styles/fonts.css";
 import "@/styles/scrollbar.css";
 import "@/v2/styles/global.css";
+import "@mdi/font/css/materialdesignicons.css";
 
 // Recover from stale chunks after a redeploy: hashed asset names change, so
 // a tab opened before the deploy 404s (or gets HTML) on its next lazy import
