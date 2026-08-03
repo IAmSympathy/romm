@@ -1,6 +1,6 @@
 import { ref } from "vue";
 import type { Rom } from "@/types";
-import storeAuth from "@/stores/auth";
+import authStore from "@/store/auth";
 import type { MonitoredChallengeItem } from "@/v2/components/Player/RAChallengeIndicators.vue";
 import { raClient } from "./RetroAchievementsClient";
 import { raRuntime } from "./RetroAchievementsRuntime";
@@ -79,8 +79,7 @@ export class RetroAchievementsManager {
     this.completionTriggered = false;
     this.activeChallenges.value = [];
 
-    const auth = storeAuth();
-    const user = auth.user;
+    const user = authStore.user;
 
     // 1. Check user login credentials
     if (!user || !user.ra_username || !user.ra_token) {
