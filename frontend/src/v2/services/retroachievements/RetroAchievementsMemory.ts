@@ -101,7 +101,7 @@ export class RetroAchievementsMemory {
     const core = this.activeCore;
     if (core.includes("snes") || core.includes("bsnes")) return address & 0x1ffff;
     if (core.includes("sega") || core.includes("genesis") || core.includes("megadrive") || core.includes("picodrive")) return address & 0xffff;
-    if (core.includes("gb") || core.includes("gambatte") || core.includes("sameboy") || core.includes("gearboy")) return address & 0xffff;
+    if (core.includes("gb") || core.includes("gambatte") || core.includes("sameboy") || core.includes("gearboy")) return address & 0x1fff;
     if (core.includes("gba") || core.includes("vba") || core.includes("mgba")) return address >= 0x02000000 ? (address - 0x02000000) & 0x3ffff : address & 0x3ffff;
     if (core.includes("n64") || core.includes("mupen64plus")) return address & 0x7fffff;
     if (core.includes("nes") || core.includes("fceumm") || core.includes("nestopia") || core.includes("mesen")) return address & 0x07ff;
@@ -157,9 +157,9 @@ export class RetroAchievementsMemory {
 
     let val = 0;
     if (this.providerManager.activeProvider) {
-      if (size === 1) val = this.providerManager.readByte(address, bit);
-      else if (size === 2) val = this.providerManager.readWord(address, false, endian);
-      else if (size === 4) val = this.providerManager.readDword(address, false, endian);
+      if (size === 1) val = this.providerManager.readByte(mappedAddress, bit);
+      else if (size === 2) val = this.providerManager.readWord(mappedAddress, false, endian);
+      else if (size === 4) val = this.providerManager.readDword(mappedAddress, false, endian);
     } else if (this.isResolved) {
       const { wasmPointer } = this.resolveAddress(address);
       const discovery = this.discoverMemory();
@@ -180,6 +180,20 @@ export class RetroAchievementsMemory {
             : ((heap[wasmPointer] << 24) | (heap[wasmPointer + 1] << 16) | (heap[wasmPointer + 2] << 8) | heap[wasmPointer + 3]) >>> 0;
         }
       }
+    }
+
+    if (!this.loggedReadAddresses.has(address)) {
+      this.loggedReadAddresses.add(address);
+      const provName = this.providerManager.activeProvider?.name || this.resolutionMethod || "Direct WASM Heap";
+      const heapPtr = this.ramOffset + mappedAddress;
+      console.group(`%c[RA Memory Read Diagnostic] Address 0x${address.toString(16).toUpperCase()}`, "color: #06b6d4; font-weight: bold;");
+      console.log("%cAdresse demandée (rcheevos):", "font-weight: bold;", `0x${address.toString(16).toUpperCase()} (${address})`);
+      console.log("%cMapped Offset:", "font-weight: bold;", `0x${mappedAddress.toString(16).toUpperCase()} (${mappedAddress})`);
+      console.log("%cProvider mémoire utilisé:", "font-weight: bold;", provName);
+      console.log("%cTaille disponible:", "font-weight: bold;", `${this.ramSize} bytes`);
+      console.log("%cOffset réellement lu (Heap PTR):", "font-weight: bold;", `0x${heapPtr.toString(16).toUpperCase()} (${heapPtr})`);
+      console.log("%cValeur lue:", "font-weight: bold;", val);
+      console.groupEnd();
     }
 
     if (!isDelta && !isPrior) {
