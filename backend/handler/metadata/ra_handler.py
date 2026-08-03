@@ -146,6 +146,44 @@ class RAHandler(MetadataHandler):
         return bool(response)
 
     @staticmethod
+    async def test_user_credentials(
+        username: str, password: str | None = None, token: str | None = None
+    ) -> dict[str, Any]:
+        """Test RetroAchievements credentials against retroachievements.org login2 endpoint."""
+        import httpx
+
+        params: dict[str, str] = {"r": "login2", "u": username}
+        if password:
+            params["p"] = password
+        elif token:
+            params["t"] = token
+        else:
+            return {"success": False, "error": "Password or token is required"}
+
+        url = "https://retroachievements.org/dorequest.php"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                res = await client.get(url, params=params)
+                if res.status_code != 200:
+                    return {"success": False, "error": f"HTTP error {res.status_code}"}
+                data = res.json()
+                if data.get("Success") is True:
+                    return {
+                        "success": True,
+                        "token": data.get("Token", token or ""),
+                        "username": data.get("User", username),
+                        "score": data.get("Score", 0),
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": data.get("Error", "Invalid username, password, or token."),
+                    }
+            except Exception as e:
+                log.error("Failed to test RetroAchievements credentials: %s", e)
+                return {"success": False, "error": str(e)}
+
+    @staticmethod
     def extract_ra_id_from_filename(fs_name: str) -> int | None:
         """Extract RetroAchievements ID from filename tag like (ra-12345)."""
         match = RA_TAG_REGEX.search(fs_name)

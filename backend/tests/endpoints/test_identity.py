@@ -467,3 +467,41 @@ def test_update_user_ui_settings_nested_object(
 
     user = response.json()
     assert user["ui_settings"] == nested_settings
+
+
+def test_update_user_ra_token(client, access_token: str, editor_user: User):
+    """Test updating user ra_username and ra_token."""
+    response = client.put(
+        f"/api/users/{editor_user.id}",
+        data={"ra_username": "retro_player", "ra_token": "secret_ra_token_123"},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert response.status_code == HTTPStatus.OK
+    user = response.json()
+    assert user["ra_username"] == "retro_player"
+    assert user["ra_token"] == "secret_ra_token_123"
+
+
+@mock.patch("endpoints.user.meta_ra_handler.test_user_credentials")
+def test_test_retro_achievements_endpoint(
+    mock_test_creds, client, access_token: str, editor_user: User
+):
+    """Test the POST /api/users/{id}/ra/test endpoint."""
+    mock_test_creds.return_value = {
+        "success": True,
+        "token": "returned_token_abc",
+        "username": "retro_player",
+        "score": 1500,
+    }
+
+    response = client.post(
+        f"/api/users/{editor_user.id}/ra/test",
+        json={"ra_username": "retro_player", "ra_password": "my_password"},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    assert data["success"] is True
+    assert data["token"] == "returned_token_abc"
+    assert data["score"] == 1500
+

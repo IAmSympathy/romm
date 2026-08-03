@@ -29,6 +29,7 @@ class UserSchema(BaseModel):
     last_login: UTCDatetime | None
     last_active: UTCDatetime | None
     ra_username: str | None = None
+    ra_token: str | None = None
     ra_progression: RAProgression | None = None
     ui_settings: dict | None = None
     current_device_id: str | None = None

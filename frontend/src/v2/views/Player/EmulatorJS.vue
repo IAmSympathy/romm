@@ -59,6 +59,8 @@ import {
 } from "@/v2/utils/playerBezel";
 import { resolveStoredDisc } from "@/v2/utils/playerDisc";
 import { installIOSFullscreenShim } from "@/views/Player/EmulatorJS/utils";
+import RANotifications from "@/v2/components/Player/RANotifications.vue";
+import { raManager } from "@/v2/services/retroachievements";
 
 // Reuse v1's heavy emulator integration — do NOT rewrite this. Lazy so the
 // bundle doesn't pull in the EJS shims until we actually mount the player.
@@ -480,12 +482,16 @@ onMounted(async () => {
 // to Play on exit so a Start-Play loop stays on the pad.
 watch(gameRunning, (running, prev) => {
   if (running && !prev) {
-    if (rom.value) playSession.start(rom.value);
+    if (rom.value) {
+      playSession.start(rom.value);
+      raManager.initializeSession(auth.user, rom.value);
+    }
     emitActivityStart();
     startActivityHeartbeat();
   }
   if (prev && !running) {
     playSession.flush();
+    raManager.reset();
     stopActivityHeartbeat();
     emitActivityStop();
     nextTick(focusPlayButton);
@@ -505,6 +511,7 @@ onBeforeUnmount(() => {
   // the user never exited the game to the config screen first. flush() is
   // idempotent, so an exit that already flushed via the watch is a no-op.
   playSession.flush();
+  raManager.reset();
   stopActivityHeartbeat();
   emitActivityStop();
   // Hand the keyboard and gamepad back to the UI; the flag otherwise
@@ -791,6 +798,10 @@ const selectedAsset = computed<SaveSchema | StateSchema | null>(() =>
 
     <!-- Running state -->
     <div v-else-if="rom" class="r-v2-ejs__stage">
+      <RANotifications
+        :notifications="raManager.notifications.value"
+        @dismiss="raManager.dismissNotification"
+      />
       <Player
         :rom="rom"
         :state="selectedState"

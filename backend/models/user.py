@@ -87,6 +87,9 @@ class User(BaseModel, SimpleUser):
     ra_username: Mapped[str | None] = mapped_column(
         String(length=TEXT_FIELD_LENGTH), default=""
     )
+    ra_token: Mapped[str | None] = mapped_column(
+        String(length=TEXT_FIELD_LENGTH), default=""
+    )
     ra_progression: Mapped[dict[str, Any] | None] = mapped_column(
         CustomJSON(), default=dict
     )

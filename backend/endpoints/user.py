@@ -436,8 +436,11 @@ async def update_user(
     if form_data.enabled is not None and request.user.id != id:
         cleaned_data["enabled"] = form_data.enabled  # type: ignore[assignment]
 
-    if form_data.ra_username:
+    if form_data.ra_username is not None:
         cleaned_data["ra_username"] = form_data.ra_username  # type: ignore[assignment]
+
+    if form_data.ra_token is not None:
+        cleaned_data["ra_token"] = form_data.ra_token  # type: ignore[assignment]
 
     if form_data.ui_settings is not None:
         try:
@@ -578,3 +581,34 @@ async def refresh_retro_achievements(
         },
     )
     return None
+
+
+@protected_route(
+    router.post,
+    "/{id}/ra/test",
+    [Scope.ME_WRITE],
+    status_code=status.HTTP_200_OK,
+    summary="Test RetroAchievements credentials",
+)
+async def test_retro_achievements(
+    request: Request,
+    id: Annotated[int, PathVar(description="User internal id.", ge=1)],
+    ra_username: Annotated[str, Body(embed=True)],
+    ra_password: Annotated[str | None, Body(embed=True)] = None,
+    ra_token: Annotated[str | None, Body(embed=True)] = None,
+) -> dict[str, Any]:
+    """Test RetroAchievements username and password/token credentials."""
+    user = db_user_handler.get_user(id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    result = await meta_ra_handler.test_user_credentials(
+        username=ra_username,
+        password=ra_password,
+        token=ra_token,
+    )
+    return result
+

@@ -78,6 +78,7 @@ async function updateUser({
       enabled: attrs.enabled,
       role: attrs.role,
       ra_username: attrs.ra_username,
+      ra_token: attrs.ra_token,
       ui_settings: attrs.ui_settings,
     },
     {
@@ -105,6 +106,30 @@ async function refreshRetroAchievements({
   return api.post<void>(`/users/${id}/ra/refresh`, payload);
 }
 
+async function testRetroAchievements({
+  id,
+  ra_username,
+  ra_password,
+  ra_token,
+}: {
+  id: number;
+  ra_username: string;
+  ra_password?: string;
+  ra_token?: string;
+}) {
+  return api.post<{
+    success: boolean;
+    token?: string;
+    username?: string;
+    score?: number;
+    error?: string;
+  }>(`/users/${id}/ra/test`, {
+    ra_username,
+    ra_password: ra_password || null,
+    ra_token: ra_token || null,
+  });
+}
+
 export default {
   createUser,
   createInviteLink,
@@ -115,4 +140,5 @@ export default {
   updateUser,
   deleteUser,
   refreshRetroAchievements,
+  testRetroAchievements,
 };
