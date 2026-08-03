@@ -269,21 +269,41 @@ class RAHandler(MetadataHandler):
             try:
                 res = await client.get(url, params=params)
                 if res.status_code != 200:
-                    return {"success": False, "error": f"HTTP error {res.status_code}"}
+                    return {
+                        "success": False,
+                        "status": "AWARD_REJECTED",
+                        "http_status": res.status_code,
+                        "error": f"HTTP error {res.status_code}",
+                        "response": None,
+                    }
                 data = res.json()
                 if data.get("Success") is True:
                     return {
                         "success": True,
+                        "status": "AWARD_ACCEPTED",
+                        "http_status": 200,
                         "score": data.get("Score", 0),
                         "achievement_id": achievement_id,
+                        "response": data,
                     }
+                err_msg = data.get("Error", "Failed to award achievement")
+                is_already = "already" in err_msg.lower()
                 return {
                     "success": False,
-                    "error": data.get("Error", "Failed to award achievement"),
+                    "status": "ALREADY_UNLOCKED" if is_already else "AWARD_REJECTED",
+                    "http_status": 200,
+                    "error": err_msg,
+                    "response": data,
                 }
             except Exception as e:
                 log.error("Failed to award RA achievement %s: %s", achievement_id, e)
-                return {"success": False, "error": str(e)}
+                return {
+                    "success": False,
+                    "status": "AWARD_REJECTED",
+                    "http_status": 500,
+                    "error": str(e),
+                    "response": None,
+                }
 
     @staticmethod
     def extract_ra_id_from_filename(fs_name: str) -> int | None:

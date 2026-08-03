@@ -3,6 +3,14 @@ import { RAMemoryReader } from "./RAMemoryReader";
 import { RCheevosEngine } from "./RCheevosEngine";
 import { RCTriggerState, type RCTrigger } from "./RCheevosTypes";
 
+export enum AchievementPipelineStatus {
+  LOCAL_TRIGGERED = "LOCAL_TRIGGERED",
+  AWARD_PENDING = "AWARD_PENDING",
+  AWARD_ACCEPTED = "AWARD_ACCEPTED",
+  AWARD_REJECTED = "AWARD_REJECTED",
+  ALREADY_UNLOCKED = "ALREADY_UNLOCKED",
+}
+
 export interface MonitoredAchievement {
   id: number;
   title: string;
@@ -11,6 +19,8 @@ export interface MonitoredAchievement {
   triggerStr: string;
   trigger: RCTrigger | null;
   unlocked: boolean;
+  pipelineStatus?: AchievementPipelineStatus;
+  detectionTime?: string;
 }
 
 export class RetroAchievementsRuntime {
@@ -34,6 +44,26 @@ export class RetroAchievementsRuntime {
   public lastEvaluationMs: number = 0;
 
   /**
+   * Format badge image URL to use backend proxy resolving browser CORS/CORP restrictions.
+   */
+  public formatBadgeUrl(rawBadgeUrl?: string): string {
+    if (!rawBadgeUrl) return "/assets/romm/resources/metadata_providers/ra.png";
+
+    const match = rawBadgeUrl.match(/Badge\/([^/]+)$/i);
+    if (match && match[1]) {
+      return `/api/users/ra/badge/${match[1]}`;
+    }
+
+    if (rawBadgeUrl.startsWith("http://") || rawBadgeUrl.startsWith("https://")) {
+      const parts = rawBadgeUrl.split("/");
+      const filename = parts[parts.length - 1];
+      return `/api/users/ra/badge/${filename}`;
+    }
+
+    return rawBadgeUrl;
+  }
+
+  /**
    * Initialize runtime for a specific user and game.
    */
   public initialize(userId: number, gameId: number, rawAchievements: any[]) {
@@ -49,7 +79,6 @@ export class RetroAchievementsRuntime {
 
   /**
    * Load and parse achievements list with detailed diagnostic output and robust deduplication.
-   * Prefer official non-copy entries and lower IDs when duplicates exist.
    */
   public loadAchievements(rawAchievements: any[]) {
     this.achievements = [];
@@ -84,9 +113,6 @@ export class RetroAchievementsRuntime {
         const existingIsCopy =
           existing.title.toLowerCase().includes("(copy)") || existing.title.toLowerCase().includes("[copy]");
 
-        // Priority logic:
-        // 1. Prefer non-copy over copy
-        // 2. If both are non-copy or both are copy, prefer lower ID (official achievement)
         if (existingIsCopy && !isCopy) {
           console.log(
             `%c[RA Dedup REPLACED] Preferred official ID:${ach.id} ("${ach.title}") over copy ID:${existing.id} ("${existing.title}")`,
@@ -131,11 +157,13 @@ export class RetroAchievementsRuntime {
       console.warn(`[RA Runtime] Failed to parse rcheevos trigger for achievement ${raw.id}:`, err);
     }
 
+    const rawBadge = raw.badgeUrl || raw.BadgeURL || (raw.BadgeName ? `https://media.retroachievements.org/Badge/${raw.BadgeName}.png` : undefined);
+
     return {
       id: Number(raw.id || raw.ID),
       title: raw.title || raw.Title || "Untitled",
       points: Number(raw.points || raw.Points || 0),
-      badgeUrl: raw.badgeUrl,
+      badgeUrl: this.formatBadgeUrl(rawBadge),
       triggerStr,
       trigger: parsedTrigger,
       unlocked: Boolean(raw.unlocked),
@@ -208,7 +236,6 @@ export class RetroAchievementsRuntime {
     }
     this.checksPerSecond = this.tickTimestamps.length;
 
-    // Retry resolution if core WASM was still booting during start()
     if (!this.memoryReader.raMemory.isResolved) {
       const core = (window as any).EJS_core || "fceumm";
       const resolved = this.memoryReader.raMemory.resolveMemory(core);
@@ -217,10 +244,8 @@ export class RetroAchievementsRuntime {
 
     this.frameIndex++;
 
-    // Advance frame delta & prior memory cache tracking
     this.memoryReader.beginFrame();
 
-    // 1. Warmup / Game Stabilization Guard Rail
     if (!this.warmupCompleted) {
       this.warmupTicks++;
       if (this.warmupTicks % 60 === 1 || this.warmupTicks === this.warmupTarget) {
@@ -277,7 +302,7 @@ export class RetroAchievementsRuntime {
         });
         console.groupEnd();
 
-        console.log("%cAction:", "font-weight: bold;", "Unlocking achievement now!");
+        console.log("%cAction:", "font-weight: bold;", "Initiating Award Request Flow...");
         console.groupEnd();
 
         this.unlockAchievement(ach.id);
@@ -288,30 +313,89 @@ export class RetroAchievementsRuntime {
   }
 
   /**
-   * Unlock an achievement, dispatch award to backend relay, and trigger UI toast.
+   * Unlock an achievement, dispatch award to backend relay, validate response, and trigger UI toast.
    */
   public async unlockAchievement(achievementId: number) {
     const ach = this.achievements.find((a) => a.id === achievementId);
-    if (!ach || ach.unlocked) return;
+    if (!ach || ach.unlocked || ach.pipelineStatus === AchievementPipelineStatus.AWARD_PENDING) return;
 
-    ach.unlocked = true;
+    ach.detectionTime = new Date().toISOString();
+    ach.pipelineStatus = AchievementPipelineStatus.LOCAL_TRIGGERED;
 
-    if (this.onUnlockCallback) {
-      this.onUnlockCallback(ach);
-    }
+    ach.pipelineStatus = AchievementPipelineStatus.AWARD_PENDING;
+
+    // 1. [RA Award Request] Log
+    console.group("%c[RA Award Request]", "color: #3b82f6; font-weight: bold; font-size: 13px;");
+    console.log("%cachievementId:", "font-weight: bold;", achievementId);
+    console.log("%cgameId:", "font-weight: bold;", this.gameId);
+    console.log("%cusername/userId:", "font-weight: bold;", this.userId);
+    console.log("%cpayload:", "font-weight: bold;", {
+      id: this.userId,
+      achievement_id: achievementId,
+      game_id: this.gameId,
+    });
+    console.groupEnd();
+
+    let httpStatus = 0;
+    let resData: any = {};
 
     if (this.userId && this.gameId) {
       try {
-        console.log(`[RA Runtime] Submitting award to backend: game=${this.gameId}, ach=${achievementId}`);
         const res = await userApi.awardRetroAchievement(this.userId, this.gameId, achievementId);
-        if (res.data.success) {
-          console.log("[RA Runtime] Unlock successfully recorded on RetroAchievements!");
-        } else {
-          console.warn("[RA Runtime] Unlock submission returned error:", res.data.error);
-        }
-      } catch (err) {
-        console.error("[RA Runtime] Failed to submit achievement unlock:", err);
+        httpStatus = res.status;
+        resData = res.data;
+      } catch (err: any) {
+        httpStatus = err.response?.status || 500;
+        resData = err.response?.data || { success: false, error: err.message };
       }
+    }
+
+    // 2. [RA Award Response] Log
+    console.group("%c[RA Award Response]", "color: #a855f7; font-weight: bold; font-size: 13px;");
+    console.log("%cstatus:", "font-weight: bold;", httpStatus);
+    console.log("%cresponse body:", "font-weight: bold;", resData);
+    console.log("%cparsed result:", "font-weight: bold;", {
+      success: resData?.success,
+      status: resData?.status,
+      error: resData?.error,
+    });
+    console.groupEnd();
+
+    // Determine final status based on backend response
+    if (resData?.status === "ALREADY_UNLOCKED" || (resData?.error && String(resData.error).toLowerCase().includes("already"))) {
+      ach.pipelineStatus = AchievementPipelineStatus.ALREADY_UNLOCKED;
+    } else if (resData?.status === "AWARD_ACCEPTED" || resData?.success === true) {
+      ach.pipelineStatus = AchievementPipelineStatus.AWARD_ACCEPTED;
+    } else {
+      ach.pipelineStatus = AchievementPipelineStatus.AWARD_REJECTED;
+    }
+
+    // Mark unlocked if accepted or already unlocked
+    if (ach.pipelineStatus === AchievementPipelineStatus.AWARD_ACCEPTED || ach.pipelineStatus === AchievementPipelineStatus.ALREADY_UNLOCKED) {
+      ach.unlocked = true;
+    }
+
+    // 3. [RA Achievement Pipeline] Summary Table Log
+    console.group("%c[RA Achievement Pipeline]", "color: #22c55e; font-weight: bold; font-size: 14px;");
+    console.table({
+      "Achievement ID": ach.id,
+      "Achievement Name": ach.title,
+      "Trigger State": "RC_TRIGGER_STATE_TRIGGERED",
+      "Detection Time": ach.detectionTime,
+      "Award Request Sent": true,
+      "Award HTTP Status": httpStatus,
+      "Award Response": resData?.status || (resData?.success ? "SUCCESS" : "ERROR"),
+      "Final Status": ach.pipelineStatus,
+    });
+    console.groupEnd();
+
+    // 4. Trigger UI notification callback only on ACCEPTED or ALREADY_UNLOCKED
+    if (
+      (ach.pipelineStatus === AchievementPipelineStatus.AWARD_ACCEPTED ||
+        ach.pipelineStatus === AchievementPipelineStatus.ALREADY_UNLOCKED) &&
+      this.onUnlockCallback
+    ) {
+      this.onUnlockCallback(ach);
     }
   }
 }

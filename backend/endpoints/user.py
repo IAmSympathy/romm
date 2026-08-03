@@ -708,3 +708,31 @@ async def award_retro_achievement(
         token=user.ra_token,
     )
 
+
+@router.get("/ra/badge/{badge_name}")
+async def proxy_ra_badge(badge_name: str) -> Any:
+    """Proxy RetroAchievements badge image to resolve browser CORS/CORP restrictions."""
+    import httpx
+    from fastapi.responses import Response
+
+    clean_name = badge_name.replace("/", "").replace("..", "")
+    target_url = f"https://media.retroachievements.org/Badge/{clean_name}"
+
+    headers = {"User-Agent": "RetroArch/1.21.0 RomM/3.7.0"}
+    async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
+        try:
+            res = await client.get(target_url)
+            if res.status_code == 200:
+                return Response(
+                    content=res.content,
+                    media_type="image/png",
+                    headers={
+                        "Cache-Control": "public, max-age=86400",
+                        "Access-Control-Allow-Origin": "*",
+                    },
+                )
+        except Exception as e:
+            log.error("Failed to proxy RA badge %s: %s", badge_name, e)
+
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Badge not found")
+
