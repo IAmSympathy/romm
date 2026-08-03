@@ -126,7 +126,64 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     }
     console.groupEnd();
 
+    if (this.isResolvedState) {
+      this.dumpGameBoyHRAMDiagnostic();
+    }
+
     return this.isResolvedState;
+  }
+
+  public dumpGameBoyHRAMDiagnostic() {
+    if (!this.isResolvedState || this.ramOffset <= 0) return;
+
+    const emu = (window as any).EJS_emulator;
+    const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
+    const heap: Uint8Array | null = mod?.HEAPU8 || null;
+    if (!heap) return;
+
+    console.group("%c[RA Game Boy HRAM Memory Dump Diagnostic]", "color: #ec4899; font-weight: bold; font-size: 14px;");
+    console.log(`%cWRAM Pointer (ramOffset): 0x${this.ramOffset.toString(16).toUpperCase()}`, "font-weight: bold;");
+
+    const formatHexChunk = (startOffset: number, length: number) => {
+      const rows: string[] = [];
+      let nonZeroCount = 0;
+
+      for (let i = 0; i < length; i += 16) {
+        const rowAddr = startOffset + i;
+        const rowHexAddr = `0x${rowAddr.toString(16).toUpperCase().padStart(4, "0")}`;
+        const bytes: string[] = [];
+
+        for (let j = 0; j < 16 && i + j < length; j++) {
+          const ptr = this.ramOffset + startOffset + i + j;
+          const byteVal = ptr < heap.length ? heap[ptr] : 0;
+          if (byteVal !== 0) nonZeroCount++;
+          bytes.push(byteVal.toString(16).toUpperCase().padStart(2, "0"));
+        }
+        rows.push(`${rowHexAddr}: ${bytes.join(" ")}`);
+      }
+
+      return { rows, nonZeroCount };
+    };
+
+    // Range 1: 0x1F00 - 0x1FFF (8000 - 8191, end of 8KB WRAM)
+    const range1 = formatHexChunk(0x1f00, 256);
+    console.group(`%c1. SYSTEM_RAM Offsets 0x1F00-0x1FFF (${range1.nonZeroCount} non-zero bytes)`, "color: #3b82f6; font-weight: bold;");
+    console.log(range1.rows.join("\n"));
+    console.groupEnd();
+
+    // Range 2: 0x2000 - 0x207F (8192 - 8319, immediately after 8KB WRAM)
+    const range2 = formatHexChunk(0x2000, 128);
+    console.group(`%c2. SYSTEM_RAM Offsets 0x2000-0x207F (${range2.nonZeroCount} non-zero bytes)`, "color: #a855f7; font-weight: bold;");
+    console.log(range2.rows.join("\n"));
+    console.groupEnd();
+
+    // Range 3: 0x3F80 - 0x3FFF (16256 - 16383, 16KB offset)
+    const range3 = formatHexChunk(0x3f80, 128);
+    console.group(`%c3. SYSTEM_RAM Offsets 0x3F80-0x3FFF (${range3.nonZeroCount} non-zero bytes)`, "color: #eab308; font-weight: bold;");
+    console.log(range3.rows.join("\n"));
+    console.groupEnd();
+
+    console.groupEnd();
   }
 
   public readByte(address: number, bit?: number | null): number {
