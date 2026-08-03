@@ -209,7 +209,7 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     if (!mod || !mod.HEAPU8) return null;
 
     const asm = mod.asm || mod.wasmExports || {};
-    const heap = mod.HEAPU8;
+    const heap: Uint8Array = mod.HEAPU8;
 
     const mapFn = mod.EmulatorJSGetMemoryMap || asm.EmulatorJSGetMemoryMap ||
                   mod._retro_get_memory_map || asm._retro_get_memory_map ||
@@ -242,27 +242,27 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
       this.parsedMemoryMap = parseWasmMemoryMap(mmapPtr, heap);
     }
 
-    if (!this.parsedMemoryMap) {
-      this.parsedMemoryMap = scanWasmHeapForMemoryMap(heap);
-    }
-
     const fnToTest = mod.EmulatorJSGetMemoryData || asm.EmulatorJSGetMemoryData || mod._get_memory_data || asm._get_memory_data;
     const fnSize = mod.EmulatorJSGetMemorySize || asm.EmulatorJSGetMemorySize || mod._get_memory_size || asm._get_memory_size || mod.retro_get_memory_size || asm.retro_get_memory_size;
 
-    const probedIntegerIds: { id: number; ptr: number; size: number }[] = [];
+    const probedIntegerIds: { id: number; ptr: number; size: number; previewHex: string }[] = [];
     if (typeof fnToTest === "function") {
       for (let id = 0; id <= 32; id++) {
         try {
           const ptr = fnToTest(id);
           if (typeof ptr === "number" && ptr > 0 && ptr < heap.length) {
             const sz = typeof fnSize === "function" ? (fnSize(id) || 0) : 0;
-            probedIntegerIds.push({ id, ptr, size: sz });
+            const bytes: string[] = [];
+            for (let b = 0; b < 32 && ptr + b < heap.length; b++) {
+              bytes.push(heap[ptr + b].toString(16).toUpperCase().padStart(2, "0"));
+            }
+            probedIntegerIds.push({ id, ptr, size: sz, previewHex: bytes.join(" ") });
           }
         } catch {}
       }
     }
 
-    console.group("%c[RA Libretro Memory Map Probe]", "color: #8b5cf6; font-weight: bold; font-size: 14px;");
+    console.group("%c[RA Memory Provider Selection Diagnostic]", "color: #8b5cf6; font-weight: bold; font-size: 14px;");
     if (this.parsedMemoryMap && this.parsedMemoryMap.numDescriptors > 0) {
       console.log(`%cFound official retro_memory_map with ${this.parsedMemoryMap.numDescriptors} descriptor(s):`, "color: #22c55e; font-weight: bold;");
       this.parsedMemoryMap.descriptors.forEach((d, idx) => {
@@ -271,15 +271,13 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
         );
       });
     } else {
-      console.log("%cNo official retro_memory_map descriptor table exposed by WASM module exports or WASM heap scan.", "color: #f59e0b; font-weight: bold;");
-      console.log("Tested functions: EmulatorJSGetMemoryMap, _retro_get_memory_map, retro_get_memory_map, _get_memory_map");
-      console.log("Tested symbols: retro_memory_map, _retro_memory_map");
+      console.log("%cNo official retro_memory_map descriptor table exported by WASM module exports.", "color: #f59e0b; font-weight: bold;");
     }
 
     if (probedIntegerIds.length > 0) {
       console.log("%c[Probed Libretro Integer Memory IDs 0..32]:", "color: #06b6d4; font-weight: bold;");
       probedIntegerIds.forEach((item) => {
-        console.log(`  ID ${item.id}: Pointer 0x${item.ptr.toString(16).toUpperCase()} | Size: ${item.size} bytes`);
+        console.log(`  ID ${item.id}: Pointer 0x${item.ptr.toString(16).toUpperCase()} | Size: ${item.size} bytes | First 32 bytes: ${item.previewHex}`);
       });
     }
     console.groupEnd();
@@ -293,7 +291,7 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     if (!mod || !mod.HEAPU8) return false;
 
     const asm = mod.asm || mod.wasmExports || {};
-    const validKeys: { key: string; result: any; pointer: number; size: number }[] = [];
+    const validKeys: { key: string; result: any; pointer: number; size: number; previewHex: string }[] = [];
 
     const fnToTest = mod.EmulatorJSGetMemoryData || asm.EmulatorJSGetMemoryData || mod._get_memory_data || asm._get_memory_data;
     const fnSize = mod.EmulatorJSGetMemorySize || asm.EmulatorJSGetMemorySize || mod._get_memory_size || asm._get_memory_size || mod.retro_get_memory_size || asm.retro_get_memory_size;
@@ -329,9 +327,17 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
               }
             }
 
+            const heap: Uint8Array = mod.HEAPU8;
+            const bytes: string[] = [];
+            if (ptr > 0 && heap) {
+              for (let b = 0; b < 32 && ptr + b < heap.length; b++) {
+                bytes.push(heap[ptr + b].toString(16).toUpperCase().padStart(2, "0"));
+              }
+            }
+
             if (ptr > 0 || (typeof res === "object" && res)) {
-              validKeys.push({ key: strKey, result: res, pointer: ptr, size: sz });
-              if (ptr > 0 && !this.isResolvedState) {
+              validKeys.push({ key: strKey, result: res, pointer: ptr, size: sz, previewHex: bytes.join(" ") });
+              if (ptr > 0 && !this.isResolvedState && strKey === "RETRO_MEMORY_SYSTEM_RAM") {
                 this.ramOffset = ptr;
                 this.ramSize = sz;
                 this.isResolvedState = true;
@@ -348,11 +354,12 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     console.group("%c[RA EmulatorJS Valid Memory Keys]", "color: #10b981; font-weight: bold; font-size: 14px;");
     if (validKeys.length > 0) {
       for (const vk of validKeys) {
-        console.log(`%ckey: "${vk.key}", pointer: 0x${vk.pointer.toString(16).toUpperCase()}, size: ${vk.size}`, "color: #22c55e; font-weight: bold;");
+        console.log(`%ckey: "${vk.key}", pointer: 0x${vk.pointer.toString(16).toUpperCase()}, size: ${vk.size} | First 32 bytes: ${vk.previewHex}`, "color: #22c55e; font-weight: bold;");
       }
     } else {
       console.log(`Tested ${knownKeys.length} known Libretro memory key constants. Awaiting key match...`);
     }
+    console.log(`%cSelected SYSTEM_RAM Provider: "${this.activeFnName}", pointer: 0x${this.ramOffset.toString(16).toUpperCase()}, size: ${this.ramSize} bytes`, "color: #06b6d4; font-weight: bold;");
     console.groupEnd();
 
     this.probeLibretroMemoryMap();
@@ -402,18 +409,6 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     console.log(range1.rows.join("\n"));
     console.groupEnd();
 
-    // Range 2: 0x2000 - 0x207F (8192 - 8319, immediately after 8KB WRAM)
-    const range2 = formatHexChunk(0x2000, 128);
-    console.group(`%c2. SYSTEM_RAM Offsets 0x2000-0x207F (${range2.nonZeroCount} non-zero bytes)`, "color: #a855f7; font-weight: bold;");
-    console.log(range2.rows.join("\n"));
-    console.groupEnd();
-
-    // Range 3: 0x3F80 - 0x3FFF (16256 - 16383, 16KB offset)
-    const range3 = formatHexChunk(0x3f80, 128);
-    console.group(`%c3. SYSTEM_RAM Offsets 0x3F80-0x3FFF (${range3.nonZeroCount} non-zero bytes)`, "color: #eab308; font-weight: bold;");
-    console.log(range3.rows.join("\n"));
-    console.groupEnd();
-
     console.groupEnd();
   }
 
@@ -425,10 +420,13 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     if (!heap) return 0;
 
     let ptr = 0;
+    let provId = "RETRO_MEMORY_SYSTEM_RAM (ID 2)";
+
     if (this.parsedMemoryMap && realAddress !== undefined) {
       const resolved = resolveDescriptorAddress(this.parsedMemoryMap, realAddress);
       if (resolved) {
         ptr = resolved.wasmPointer;
+        provId = `retro_memory_map desc (start: 0x${resolved.desc.start.toString(16).toUpperCase()})`;
       }
     }
 
@@ -441,6 +439,10 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     if (bit !== undefined && bit !== null && bit >= 0 && bit <= 7) {
       val = (val >> bit) & 1;
     }
+
+    const cpuAddrHex = `0x${(realAddress !== undefined ? realAddress : address).toString(16).toUpperCase().padStart(4, "0")}`;
+    console.log(`[RA Read Byte] CPU address ${cpuAddrHex} -> provider ID: ${provId} -> WASM ptr: 0x${ptr.toString(16).toUpperCase()} -> offset: 0x${address.toString(16).toUpperCase()} (${address}) -> value: ${val}`);
+
     return val;
   }
 
