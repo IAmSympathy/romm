@@ -1,7 +1,7 @@
 import userApi from "@/services/api/user";
-import { RAMemoryReader } from "./RAMemoryReader";
+import type { MonitoredChallengeItem } from "@/v2/components/Player/RAChallengeIndicators.vue";
 import { RCheevosEngine } from "./RCheevosEngine";
-import { RCTriggerState, type RCTrigger } from "./RCheevosTypes";
+import { RCConditionType, RCTriggerState, type RCTrigger } from "./RCheevosTypes";
 
 export enum AchievementPipelineStatus {
   LOCAL_TRIGGERED = "LOCAL_TRIGGERED",
@@ -14,6 +14,7 @@ export enum AchievementPipelineStatus {
 export interface MonitoredAchievement {
   id: number;
   title: string;
+  description?: string;
   points: number;
   badgeUrl?: string;
   triggerStr: string;
@@ -30,7 +31,15 @@ export class RetroAchievementsRuntime {
   public gameId: number | null = null;
   public isRunning: boolean = false;
   private animFrameId: number | null = null;
+
   public onUnlockCallback?: (achievement: MonitoredAchievement) => void;
+  public onProgressNotificationCallback?: (
+    achievement: MonitoredAchievement,
+    prevVal: number,
+    curVal: number,
+    targetVal: number
+  ) => void;
+  public onChallengeIndicatorsCallback?: (challenges: MonitoredChallengeItem[]) => void;
 
   private warmupTicks: number = 0;
   private warmupTarget: number = 180; // 180 frames (~3s at 60FPS) warmup delay
@@ -42,6 +51,10 @@ export class RetroAchievementsRuntime {
   private tickTimestamps: number[] = [];
   public checksPerSecond: number = 60.0;
   public lastEvaluationMs: number = 0;
+
+  // Real-time progress & challenge indicators tracking state
+  private prevProgressMap: Map<number, number> = new Map<number, number>();
+  public activeChallenges: MonitoredChallengeItem[] = [];
 
   /**
    * Format badge image URL to use backend proxy resolving browser CORS/CORP restrictions.
@@ -80,6 +93,8 @@ export class RetroAchievementsRuntime {
     this.warmupCompleted = false;
     this.frameIndex = 0;
     this.tickTimestamps = [];
+    this.prevProgressMap.clear();
+    this.activeChallenges = [];
     this.loadAchievements(rawAchievements);
   }
 
@@ -168,6 +183,7 @@ export class RetroAchievementsRuntime {
     return {
       id: Number(raw.id || raw.ID),
       title: raw.title || raw.Title || "Untitled",
+      description: raw.description || raw.Description || "",
       points: Number(raw.points || raw.Points || 0),
       badgeUrl: this.formatBadgeUrl(rawBadge),
       triggerStr,
@@ -188,6 +204,8 @@ export class RetroAchievementsRuntime {
     this.frameIndex = 0;
     this.lastTickTimestamp = performance.now();
     this.tickTimestamps = [];
+    this.prevProgressMap.clear();
+    this.activeChallenges = [];
 
     const core = (window as any).EJS_core || "fceumm";
 
@@ -284,11 +302,84 @@ export class RetroAchievementsRuntime {
     const activeList = this.achievements.filter((a) => !a.unlocked && a.trigger);
     if (activeList.length === 0) return;
 
+    const currentChallenges: MonitoredChallengeItem[] = [];
+
     for (const ach of activeList) {
       if (!ach.trigger) continue;
 
       const evalRes = RCheevosEngine.evaluateTriggerWithDebug(ach.trigger, this.memoryReader);
 
+      // --- Progress & Challenge Indicators Calculation ---
+      let currentValue = ach.trigger.measuredValue || 0;
+      let targetValue = ach.trigger.measuredTarget || 0;
+      let isMeasuredType = false;
+
+      // Inspect conditions if targetValue is 0 or to calculate max hits
+      const allCondSets = [];
+      if (ach.trigger.requirement) allCondSets.push(ach.trigger.requirement);
+      if (ach.trigger.alternative) allCondSets.push(...ach.trigger.alternative);
+
+      for (const cs of allCondSets) {
+        for (const cond of cs.conditions) {
+          if (cond.type === RCConditionType.RC_CONDITION_MEASURED) {
+            isMeasuredType = true;
+          }
+          if (cond.requiredHits > 0) {
+            if (targetValue === 0) targetValue = cond.requiredHits;
+            if (currentValue === 0) currentValue = cond.currentHits;
+          }
+        }
+      }
+
+      // Check step change in progress for progress notification
+      const prevVal = this.prevProgressMap.get(ach.id) ?? 0;
+      if (currentValue > prevVal && targetValue > 0) {
+        console.group("%c[RA Progress Notification]", "color: #f59e0b; font-weight: bold; font-size: 13px;");
+        console.log("%cAchievement:", "font-weight: bold;", ach.title);
+        console.log("%cPrevious:", "font-weight: bold;", prevVal);
+        console.log("%cCurrent:", "font-weight: bold;", currentValue);
+        console.log("%cTarget:", "font-weight: bold;", targetValue);
+        console.groupEnd();
+
+        if (this.onProgressNotificationCallback) {
+          this.onProgressNotificationCallback(ach, prevVal, currentValue, targetValue);
+        }
+      }
+      this.prevProgressMap.set(ach.id, currentValue);
+
+      // Build active challenge item if progress is active and not yet completed
+      if (currentValue > 0 && targetValue > 0 && currentValue < targetValue) {
+        const formattedProgress = ach.trigger.measuredAsPercent
+          ? `${Math.floor((currentValue / targetValue) * 100)}%`
+          : `${currentValue} / ${targetValue}`;
+
+        const challengeItem: MonitoredChallengeItem = {
+          id: ach.id,
+          title: ach.title,
+          description: ach.description,
+          points: ach.points,
+          badgeUrl: ach.badgeUrl,
+          currentValue,
+          targetValue,
+          isPercent: ach.trigger.measuredAsPercent,
+          formattedProgress,
+        };
+
+        currentChallenges.push(challengeItem);
+
+        if (shouldLogDiagnostic) {
+          console.groupCollapsed(`%c[RA Challenge Indicator] ${ach.title}`, "color: #eab308; font-weight: bold;");
+          console.log("%cAchievement:", "font-weight: bold;", ach.title);
+          console.log("%cID:", "font-weight: bold;", ach.id);
+          console.log("%cType:", "font-weight: bold;", isMeasuredType ? "Measured" : "HitTarget");
+          console.log("%cCurrent value:", "font-weight: bold;", currentValue);
+          console.log("%cTarget value:", "font-weight: bold;", targetValue);
+          console.log("%cProgress:", "font-weight: bold;", formattedProgress);
+          console.groupEnd();
+        }
+      }
+
+      // Check unlock state
       if (evalRes.state === RCTriggerState.RC_TRIGGER_STATE_TRIGGERED) {
         console.group("%c[RA rcheevos Frame Evaluation — UNLOCK DETECTED]", "color: #22c55e; font-weight: bold; font-size: 14px;");
         console.log("%cAchievement:", "font-weight: bold;", `${ach.title} (ID: ${ach.id})`);
@@ -313,6 +404,12 @@ export class RetroAchievementsRuntime {
 
         this.unlockAchievement(ach.id);
       }
+    }
+
+    // Update active challenges list if changed
+    this.activeChallenges = currentChallenges;
+    if (this.onChallengeIndicatorsCallback) {
+      this.onChallengeIndicatorsCallback(currentChallenges);
     }
 
     this.lastEvaluationMs = performance.now() - tStart;

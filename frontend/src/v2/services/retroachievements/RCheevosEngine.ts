@@ -511,6 +511,21 @@ export class RCheevosEngine {
         condPass = rawPass;
       }
 
+      // Handle Measured condition value capture
+      if (cond.type === RCConditionType.RC_CONDITION_MEASURED) {
+        if (cond.requiredHits === 0) {
+          evalState.measuredValue = {
+            type: "UNSIGNED",
+            value: this.evaluateOperand(cond.operand1),
+          };
+        } else {
+          evalState.measuredValue = {
+            type: "UNSIGNED",
+            value: cond.currentHits,
+          };
+        }
+      }
+
       condDebugs.push({
         index: i + 1,
         type: RCConditionType[cond.type],
@@ -564,14 +579,35 @@ export class RCheevosEngine {
       }
     }
 
+    let measuredTarget = 0;
+    let measuredAsPercent = false;
+
+    const allCondSets: RCCondSet[] = [];
+    if (requirement) allCondSets.push(requirement);
+    allCondSets.push(...alternative);
+
+    for (const cs of allCondSets) {
+      for (const cond of cs.conditions) {
+        if (cond.type === RCConditionType.RC_CONDITION_MEASURED) {
+          if (cond.requiredHits > 0) {
+            measuredTarget = cond.requiredHits;
+          } else {
+            measuredTarget = this.evaluateOperand(cond.operand2);
+          }
+        } else if (cond.requiredHits > 0 && measuredTarget === 0) {
+          measuredTarget = cond.requiredHits;
+        }
+      }
+    }
+
     return {
       requirement,
       alternative: alternative.length > 0 ? alternative : null,
       measuredValue: 0,
-      measuredTarget: 0,
+      measuredTarget,
       state: RCTriggerState.RC_TRIGGER_STATE_WAITING,
       hasHits: false,
-      measuredAsPercent: false,
+      measuredAsPercent,
       memrefs,
     };
   }
@@ -640,12 +676,17 @@ export class RCheevosEngine {
       ret &= sub;
     }
 
+    if (evalState.measuredValue.type !== "NONE") {
+      trigger.measuredValue = evalState.measuredValue.value;
+    }
+
     if (evalState.wasReset) {
       for (const cs of allCondSets) {
         for (const c of cs.conditions) {
           c.currentHits = 0;
         }
       }
+      trigger.measuredValue = 0;
       if (trigger.hasHits) {
         trigger.hasHits = false;
         return {
@@ -727,5 +768,6 @@ export class RCheevosEngine {
 
     trigger.state = RCTriggerState.RC_TRIGGER_STATE_WAITING;
     trigger.hasHits = false;
+    trigger.measuredValue = 0;
   }
 }
