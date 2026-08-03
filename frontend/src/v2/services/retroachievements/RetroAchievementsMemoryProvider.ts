@@ -44,6 +44,9 @@ export class MemoryRegionResolver {
     this.unmappedAddressesCount.set(cpuAddress, count + 1);
 
     return { wasmPointer: -1, region: null, isUnmapped: true };
+  }
+}
+
 export class GambatteHRAMResolver {
   public name = "Gambatte Core HRAM Resolver";
 
