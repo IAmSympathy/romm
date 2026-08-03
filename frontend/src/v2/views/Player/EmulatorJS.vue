@@ -60,7 +60,6 @@ import {
 import { resolveStoredDisc } from "@/v2/utils/playerDisc";
 import { installIOSFullscreenShim } from "@/views/Player/EmulatorJS/utils";
 import RANotifications from "@/v2/components/Player/RANotifications.vue";
-import RAChallengeIndicators from "@/v2/components/Player/RAChallengeIndicators.vue";
 import { raManager } from "@/v2/services/retroachievements";
 
 // Reuse v1's heavy emulator integration — do NOT rewrite this. Lazy so the
@@ -801,10 +800,7 @@ const selectedAsset = computed<SaveSchema | StateSchema | null>(() =>
     <div v-else-if="rom" class="r-v2-ejs__stage">
       <RANotifications
         :notifications="raManager.notifications.value"
-        @dismiss="raManager.removeNotification"
-      />
-      <RAChallengeIndicators
-        :challenges="raManager.activeChallenges.value"
+        @dismiss="raManager.dismissNotification"
       />
       <Player
         :rom="rom"
