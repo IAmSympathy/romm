@@ -42,8 +42,13 @@ export interface RCheevosFrameDebug {
   groups: RCheevosGroupDebug[];
 }
 
+export interface ParseCursor {
+  str: string;
+  pos: number;
+}
+
 /**
- * RCheevosEngine: Exact TypeScript port of official RetroAchievements rcheevos C evaluation engine
+ * RCheevosEngine: Faithful TypeScript port of official RetroAchievements rcheevos C evaluation engine
  * (operand.c, condition.c, condset.c, trigger.c, memref.c).
  */
 export class RCheevosEngine {
@@ -73,20 +78,46 @@ export class RCheevosEngine {
     reader: RAMemoryReader
   ): void {
     for (const [address, memref] of memrefs.entries()) {
-      let numBytes = 1;
-      if (
-        memref.value.size === RCMemSize.RC_MEMSIZE_16_BITS ||
-        memref.value.size === RCMemSize.RC_MEMSIZE_16_BITS_BE
-      ) {
-        numBytes = 2;
-      } else if (
-        memref.value.size === RCMemSize.RC_MEMSIZE_32_BITS ||
-        memref.value.size === RCMemSize.RC_MEMSIZE_32_BITS_BE
-      ) {
-        numBytes = 4;
+      let numBytes: 1 | 2 | 4 = 1;
+      let endian: "little" | "big" = "little";
+
+      switch (memref.value.size) {
+        case RCMemSize.RC_MEMSIZE_16_BITS:
+          numBytes = 2;
+          endian = "little";
+          break;
+        case RCMemSize.RC_MEMSIZE_16_BITS_BE:
+          numBytes = 2;
+          endian = "big";
+          break;
+        case RCMemSize.RC_MEMSIZE_24_BITS:
+          numBytes = 4;
+          endian = "little";
+          break;
+        case RCMemSize.RC_MEMSIZE_24_BITS_BE:
+          numBytes = 4;
+          endian = "big";
+          break;
+        case RCMemSize.RC_MEMSIZE_32_BITS:
+        case RCMemSize.RC_MEMSIZE_FLOAT:
+        case RCMemSize.RC_MEMSIZE_DOUBLE32:
+        case RCMemSize.RC_MEMSIZE_MBF32:
+        case RCMemSize.RC_MEMSIZE_MBF32_LE:
+          numBytes = 4;
+          endian = "little";
+          break;
+        case RCMemSize.RC_MEMSIZE_32_BITS_BE:
+        case RCMemSize.RC_MEMSIZE_FLOAT_BE:
+        case RCMemSize.RC_MEMSIZE_DOUBLE32_BE:
+          numBytes = 4;
+          endian = "big";
+          break;
+        default:
+          numBytes = 1;
+          break;
       }
 
-      const rawVal = reader.readMemory(address, numBytes as 1 | 2 | 4);
+      const rawVal = reader.readMemory(address, numBytes, null, false, false, endian);
       if (rawVal !== memref.value.value) {
         memref.value.prior = memref.value.value;
         memref.value.value = rawVal;
@@ -97,79 +128,295 @@ export class RCheevosEngine {
     }
   }
 
-  public static parseOperand(
-    raw: string,
+  /**
+   * Parse memory reference matching official rcheevos `memref.c` (rc_parse_memref).
+   */
+  public static parseMemRef(
+    cursor: ParseCursor,
     memrefs: Map<number, RCMemRef>
-  ): RCOperand {
-    let str = raw.trim();
-    let operandType = RCOperandType.RC_OPERAND_ADDRESS;
+  ): { size: RCMemSize; address: number; memref: RCMemRef } | null {
+    const { str } = cursor;
+    let size: RCMemSize = RCMemSize.RC_MEMSIZE_16_BITS;
 
-    if (str.startsWith("d0x") || str.startsWith("d0X") || str.startsWith("D0x")) {
-      operandType = RCOperandType.RC_OPERAND_DELTA;
-      str = str.substring(1);
-    } else if (str.startsWith("p0x") || str.startsWith("p0X") || str.startsWith("P0x")) {
-      operandType = RCOperandType.RC_OPERAND_PRIOR;
-      str = str.substring(1);
+    if (cursor.pos >= str.length) return null;
+
+    const char0 = str[cursor.pos];
+
+    if (char0 === "0") {
+      if (cursor.pos + 1 >= str.length) return null;
+      const char1 = str[cursor.pos + 1];
+      if (char1 !== "x" && char1 !== "X") return null;
+
+      cursor.pos += 2; // Skip '0x'
+      if (cursor.pos >= str.length) return null;
+
+      const specifier = str[cursor.pos];
+
+      switch (specifier) {
+        case "h": case "H": size = RCMemSize.RC_MEMSIZE_8_BITS; cursor.pos++; break;
+        case " ":           size = RCMemSize.RC_MEMSIZE_16_BITS; cursor.pos++; break;
+        case "x": case "X": size = RCMemSize.RC_MEMSIZE_32_BITS; cursor.pos++; break;
+        case "m": case "M": size = RCMemSize.RC_MEMSIZE_BIT_0; cursor.pos++; break;
+        case "n": case "N": size = RCMemSize.RC_MEMSIZE_BIT_1; cursor.pos++; break;
+        case "o": case "O": size = RCMemSize.RC_MEMSIZE_BIT_2; cursor.pos++; break;
+        case "p": case "P": size = RCMemSize.RC_MEMSIZE_BIT_3; cursor.pos++; break;
+        case "q": case "Q": size = RCMemSize.RC_MEMSIZE_BIT_4; cursor.pos++; break;
+        case "r": case "R": size = RCMemSize.RC_MEMSIZE_BIT_5; cursor.pos++; break;
+        case "s": case "S": size = RCMemSize.RC_MEMSIZE_BIT_6; cursor.pos++; break;
+        case "t": case "T": size = RCMemSize.RC_MEMSIZE_BIT_7; cursor.pos++; break;
+        case "l": case "L": size = RCMemSize.RC_MEMSIZE_LOW; cursor.pos++; break;
+        case "u": case "U": size = RCMemSize.RC_MEMSIZE_HIGH; cursor.pos++; break;
+        case "k": case "K": size = RCMemSize.RC_MEMSIZE_BITCOUNT; cursor.pos++; break;
+        case "w": case "W": size = RCMemSize.RC_MEMSIZE_24_BITS; cursor.pos++; break;
+        case "g": case "G": size = RCMemSize.RC_MEMSIZE_32_BITS_BE; cursor.pos++; break;
+        case "i": case "I": size = RCMemSize.RC_MEMSIZE_16_BITS_BE; cursor.pos++; break;
+        case "j": case "J": size = RCMemSize.RC_MEMSIZE_24_BITS_BE; cursor.pos++; break;
+        default:
+          if (/^[0-9a-fA-F]$/.test(specifier)) {
+            size = RCMemSize.RC_MEMSIZE_16_BITS;
+          } else {
+            console.warn(`[rcheevos] Rejected invalid memory size prefix: "${specifier}" at pos ${cursor.pos} in "${str}"`);
+            return null;
+          }
+          break;
+      }
+    } else if (char0 === "f" || char0 === "F") {
+      cursor.pos++;
+      if (cursor.pos >= str.length) return null;
+      const specifier = str[cursor.pos];
+      switch (specifier) {
+        case "f": case "F": size = RCMemSize.RC_MEMSIZE_FLOAT; cursor.pos++; break;
+        case "b": case "B": size = RCMemSize.RC_MEMSIZE_FLOAT_BE; cursor.pos++; break;
+        case "h": case "H": size = RCMemSize.RC_MEMSIZE_DOUBLE32; cursor.pos++; break;
+        case "i": case "I": size = RCMemSize.RC_MEMSIZE_DOUBLE32_BE; cursor.pos++; break;
+        case "m": case "M": size = RCMemSize.RC_MEMSIZE_MBF32; cursor.pos++; break;
+        case "l": case "L": size = RCMemSize.RC_MEMSIZE_MBF32_LE; cursor.pos++; break;
+        default:
+          console.warn(`[rcheevos] Rejected invalid float memory size prefix: "${specifier}" at pos ${cursor.pos} in "${str}"`);
+          return null;
+      }
+    } else {
+      return null;
     }
 
-    if (str.startsWith("0x") || str.startsWith("0X")) {
-      const specifier = str.substring(2, 3).toUpperCase();
-      let size: RCMemSize = RCMemSize.RC_MEMSIZE_8_BITS;
-      let addrHex = str.substring(2);
+    const rest = str.substring(cursor.pos);
+    const hexMatch = rest.match(/^[0-9a-fA-F]+/);
+    if (!hexMatch) {
+      console.warn(`[rcheevos] Failed to parse hex address at pos ${cursor.pos} in "${str}"`);
+      return null;
+    }
 
-      if (specifier === "H") {
-        size = RCMemSize.RC_MEMSIZE_8_BITS;
-        addrHex = str.substring(3);
-      } else if (specifier === "W") {
-        size = RCMemSize.RC_MEMSIZE_16_BITS;
-        addrHex = str.substring(3);
-      } else if (specifier === "X" || specifier === "G") {
-        size = RCMemSize.RC_MEMSIZE_32_BITS;
-        addrHex = str.substring(3);
-      } else if (specifier === "L") {
-        size = RCMemSize.RC_MEMSIZE_LOW;
-        addrHex = str.substring(3);
-      } else if (specifier === "I") {
-        size = RCMemSize.RC_MEMSIZE_HIGH;
-        addrHex = str.substring(3);
-      } else if (specifier >= "M" && specifier <= "U") {
-        size = (RCMemSize.RC_MEMSIZE_BIT_0 +
-          (specifier.charCodeAt(0) - "M".charCodeAt(0))) as RCMemSize;
-        addrHex = str.substring(3);
+    const hexStr = hexMatch[0];
+    const address = parseInt(hexStr, 16);
+    cursor.pos += hexStr.length;
+
+    const memref = this.getOrCreateMemRef(memrefs, address, size);
+    return { size, address, memref };
+  }
+
+  /**
+   * Parse operand matching official rcheevos `operand.c` (rc_parse_operand).
+   */
+  public static parseOperand(
+    cursor: ParseCursor,
+    memrefs: Map<number, RCMemRef>
+  ): RCOperand {
+    const { str } = cursor;
+    let operandType = RCOperandType.RC_OPERAND_ADDRESS;
+
+    if (cursor.pos >= str.length) {
+      return {
+        type: RCOperandType.RC_OPERAND_CONST,
+        size: RCMemSize.RC_MEMSIZE_32_BITS,
+        value: { num: 0 },
+      };
+    }
+
+    const ch = str[cursor.pos];
+
+    switch (ch) {
+      case "h": case "H": {
+        cursor.pos++;
+        const rest = str.substring(cursor.pos);
+        const match = rest.match(/^[0-9a-fA-F]+/);
+        if (match) {
+          const val = parseInt(match[0], 16);
+          cursor.pos += match[0].length;
+          return {
+            type: RCOperandType.RC_OPERAND_CONST,
+            size: RCMemSize.RC_MEMSIZE_32_BITS,
+            value: { num: isNaN(val) ? 0 : val },
+          };
+        }
+        break;
       }
 
-      const address = parseInt(addrHex, 16) || 0;
-      const memref = this.getOrCreateMemRef(memrefs, address, size);
+      case "f": case "F": {
+        if (cursor.pos + 1 < str.length && /^[a-zA-Z]$/.test(str[cursor.pos + 1])) {
+          const mem = this.parseMemRef(cursor, memrefs);
+          if (mem) {
+            return {
+              type: RCOperandType.RC_OPERAND_ADDRESS,
+              size: mem.size,
+              value: { memref: mem.memref, num: mem.address },
+            };
+          }
+        }
+        cursor.pos++;
+        const rest = str.substring(cursor.pos);
+        const fpMatch = rest.match(/^[-+]?[0-9]*\.?[0-9]+/);
+        if (fpMatch) {
+          const dbl = parseFloat(fpMatch[0]);
+          cursor.pos += fpMatch[0].length;
+          return {
+            type: RCOperandType.RC_OPERAND_FP,
+            size: RCMemSize.RC_MEMSIZE_FLOAT,
+            value: { num: Math.floor(dbl) || 0, dbl: isNaN(dbl) ? 0 : dbl },
+          };
+        }
+        break;
+      }
 
+      case "v": case "V": case "+": case "-": {
+        if (ch === "v" || ch === "V") cursor.pos++;
+        const rest = str.substring(cursor.pos);
+        const numMatch = rest.match(/^[-+]?[0-9]+/);
+        if (numMatch) {
+          const val = parseInt(numMatch[0], 10);
+          cursor.pos += numMatch[0].length;
+          return {
+            type: RCOperandType.RC_OPERAND_CONST,
+            size: RCMemSize.RC_MEMSIZE_32_BITS,
+            value: { num: isNaN(val) ? 0 : (val >>> 0) },
+          };
+        }
+        break;
+      }
+
+      case "{": {
+        cursor.pos++;
+        const endBrace = str.indexOf("}", cursor.pos);
+        if (endBrace !== -1) {
+          cursor.pos = endBrace + 1;
+          return {
+            type: RCOperandType.RC_OPERAND_RECALL,
+            size: RCMemSize.RC_MEMSIZE_32_BITS,
+            value: { num: 0 },
+          };
+        }
+        break;
+      }
+
+      case "d": case "D":
+        operandType = RCOperandType.RC_OPERAND_DELTA;
+        cursor.pos++;
+        break;
+
+      case "p": case "P":
+        operandType = RCOperandType.RC_OPERAND_PRIOR;
+        cursor.pos++;
+        break;
+
+      case "b": case "B":
+        operandType = RCOperandType.RC_OPERAND_BCD;
+        cursor.pos++;
+        break;
+
+      case "~":
+        operandType = RCOperandType.RC_OPERAND_INVERTED;
+        cursor.pos++;
+        break;
+
+      case "0":
+        if (cursor.pos + 1 < str.length && (str[cursor.pos + 1] === "x" || str[cursor.pos + 1] === "X")) {
+          operandType = RCOperandType.RC_OPERAND_ADDRESS;
+        } else {
+          const rest = str.substring(cursor.pos);
+          const match = rest.match(/^[0-9]+/);
+          if (match) {
+            const val = parseInt(match[0], 10);
+            cursor.pos += match[0].length;
+            return {
+              type: RCOperandType.RC_OPERAND_CONST,
+              size: RCMemSize.RC_MEMSIZE_32_BITS,
+              value: { num: isNaN(val) ? 0 : val },
+            };
+          }
+        }
+        break;
+
+      case "1": case "2": case "3": case "4": case "5":
+      case "6": case "7": case "8": case "9": {
+        const rest = str.substring(cursor.pos);
+        const match = rest.match(/^[0-9]+/);
+        if (match) {
+          const val = parseInt(match[0], 10);
+          cursor.pos += match[0].length;
+          return {
+            type: RCOperandType.RC_OPERAND_CONST,
+            size: RCMemSize.RC_MEMSIZE_32_BITS,
+            value: { num: isNaN(val) ? 0 : val },
+          };
+        }
+        break;
+      }
+
+      case "@": {
+        cursor.pos++;
+        while (cursor.pos < str.length && /[a-zA-Z0-9_]/.test(str[cursor.pos])) {
+          cursor.pos++;
+        }
+        return {
+          type: RCOperandType.RC_OPERAND_FUNC,
+          size: RCMemSize.RC_MEMSIZE_32_BITS,
+          value: { num: 0 },
+        };
+      }
+
+      default:
+        operandType = RCOperandType.RC_OPERAND_ADDRESS;
+        break;
+    }
+
+    const startPos = cursor.pos;
+    const mem = this.parseMemRef(cursor, memrefs);
+    if (mem) {
       return {
         type: operandType,
-        size,
+        size: mem.size,
         value: {
-          memref,
-          num: address,
+          memref: mem.memref,
+          num: mem.address,
         },
       };
     }
 
-    let num = 0;
-    if (str.startsWith("0x") || str.startsWith("0X")) {
-      num = parseInt(str, 16);
-    } else {
-      num = parseInt(str, 10);
+    cursor.pos = startPos;
+    const rest = str.substring(cursor.pos);
+    const constMatch = rest.match(/^[0-9]+/);
+    if (constMatch) {
+      const val = parseInt(constMatch[0], 10);
+      cursor.pos += constMatch[0].length;
+      return {
+        type: RCOperandType.RC_OPERAND_CONST,
+        size: RCMemSize.RC_MEMSIZE_32_BITS,
+        value: { num: isNaN(val) ? 0 : val },
+      };
     }
 
     return {
       type: RCOperandType.RC_OPERAND_CONST,
       size: RCMemSize.RC_MEMSIZE_32_BITS,
-      value: {
-        num: isNaN(num) ? 0 : num,
-      },
+      value: { num: 0 },
     };
   }
 
   public static evaluateOperand(operand: RCOperand): number {
     if (operand.type === RCOperandType.RC_OPERAND_CONST) {
       return operand.value.num;
+    }
+    if (operand.type === RCOperandType.RC_OPERAND_FP) {
+      return operand.value.dbl ?? operand.value.num;
     }
 
     const memref = operand.value.memref;
@@ -183,9 +430,11 @@ export class RCheevosEngine {
 
     switch (operand.size) {
       case RCMemSize.RC_MEMSIZE_LOW:
-        return val & 0x0f;
+        val = val & 0x0f;
+        break;
       case RCMemSize.RC_MEMSIZE_HIGH:
-        return (val >> 4) & 0x0f;
+        val = (val >> 4) & 0x0f;
+        break;
       case RCMemSize.RC_MEMSIZE_BIT_0:
       case RCMemSize.RC_MEMSIZE_BIT_1:
       case RCMemSize.RC_MEMSIZE_BIT_2:
@@ -195,23 +444,118 @@ export class RCheevosEngine {
       case RCMemSize.RC_MEMSIZE_BIT_6:
       case RCMemSize.RC_MEMSIZE_BIT_7: {
         const bit = operand.size - RCMemSize.RC_MEMSIZE_BIT_0;
-        return (val >> bit) & 1;
+        val = (val >> bit) & 1;
+        break;
       }
+      case RCMemSize.RC_MEMSIZE_BITCOUNT: {
+        const b = val & 0xff;
+        let cnt = 0;
+        for (let i = 0; i < 8; i++) {
+          if ((b >> i) & 1) cnt++;
+        }
+        val = cnt;
+        break;
+      }
+      case RCMemSize.RC_MEMSIZE_8_BITS:
+        val = val & 0xff;
+        break;
+      case RCMemSize.RC_MEMSIZE_16_BITS:
+        val = val & 0xffff;
+        break;
+      case RCMemSize.RC_MEMSIZE_16_BITS_BE:
+        val = ((val & 0xff00) >> 8) | ((val & 0x00ff) << 8);
+        break;
+      case RCMemSize.RC_MEMSIZE_24_BITS:
+        val = val & 0xffffff;
+        break;
+      case RCMemSize.RC_MEMSIZE_24_BITS_BE:
+        val = ((val & 0xff0000) >> 16) | (val & 0x00ff00) | ((val & 0x0000ff) << 16);
+        break;
+      case RCMemSize.RC_MEMSIZE_32_BITS:
+        val = val >>> 0;
+        break;
+      case RCMemSize.RC_MEMSIZE_32_BITS_BE:
+        val =
+          ((val & 0xff000000) >>> 24) |
+          ((val & 0x00ff0000) >>> 8) |
+          ((val & 0x0000ff00) << 8) |
+          ((val & 0x000000ff) << 24);
+        break;
       default:
-        return val;
+        break;
+    }
+
+    if (operand.type === RCOperandType.RC_OPERAND_BCD) {
+      val = ((val >> 4) & 0x0f) * 10 + (val & 0x0f);
+    } else if (operand.type === RCOperandType.RC_OPERAND_INVERTED) {
+      val = val ^ 0xffffffff;
+    }
+
+    return val;
+  }
+
+  public static parseOperator(cursor: ParseCursor): RCOperator {
+    const { str } = cursor;
+    if (cursor.pos >= str.length) return RCOperator.RC_OPERATOR_NONE;
+
+    const opChar = str[cursor.pos];
+
+    switch (opChar) {
+      case "=":
+        cursor.pos++;
+        if (cursor.pos < str.length && str[cursor.pos] === "=") cursor.pos++;
+        return RCOperator.RC_OPERATOR_EQ;
+
+      case "!":
+        if (cursor.pos + 1 < str.length && str[cursor.pos + 1] === "=") {
+          cursor.pos += 2;
+          return RCOperator.RC_OPERATOR_NE;
+        }
+        return RCOperator.RC_OPERATOR_NONE;
+
+      case "<":
+        if (cursor.pos + 1 < str.length && str[cursor.pos + 1] === "=") {
+          cursor.pos += 2;
+          return RCOperator.RC_OPERATOR_LE;
+        }
+        cursor.pos++;
+        return RCOperator.RC_OPERATOR_LT;
+
+      case ">":
+        if (cursor.pos + 1 < str.length && str[cursor.pos + 1] === "=") {
+          cursor.pos += 2;
+          return RCOperator.RC_OPERATOR_GE;
+        }
+        cursor.pos++;
+        return RCOperator.RC_OPERATOR_GT;
+
+      case "*": cursor.pos++; return RCOperator.RC_OPERATOR_MULT;
+      case "/": cursor.pos++; return RCOperator.RC_OPERATOR_DIV;
+      case "&": cursor.pos++; return RCOperator.RC_OPERATOR_AND;
+      case "^": cursor.pos++; return RCOperator.RC_OPERATOR_XOR;
+      case "%": cursor.pos++; return RCOperator.RC_OPERATOR_MOD;
+      case "+": cursor.pos++; return RCOperator.RC_OPERATOR_ADD;
+      case "-": cursor.pos++; return RCOperator.RC_OPERATOR_SUB;
+
+      case "\0": case "_": case "S": case ")": case "$":
+        return RCOperator.RC_OPERATOR_NONE;
+
+      default:
+        return RCOperator.RC_OPERATOR_NONE;
     }
   }
 
   public static parseCondition(
-    clause: string,
+    cursor: ParseCursor,
     memrefs: Map<number, RCMemRef>
   ): RCCondition | null {
-    let str = clause.trim();
-    if (!str) return null;
+    const { str } = cursor;
+    if (cursor.pos >= str.length) return null;
 
     let type: RCConditionType = RCConditionType.RC_CONDITION_STANDARD;
-    if (str.length >= 2 && str.charAt(1) === ":") {
-      const prefix = str.charAt(0).toUpperCase();
+
+    if (cursor.pos + 1 < str.length && str[cursor.pos + 1] === ":") {
+      const prefix = str[cursor.pos].toUpperCase();
       switch (prefix) {
         case "P": type = RCConditionType.RC_CONDITION_PAUSE_IF; break;
         case "R": type = RCConditionType.RC_CONDITION_RESET_IF; break;
@@ -228,47 +572,46 @@ export class RCheevosEngine {
         case "K": type = RCConditionType.RC_CONDITION_REMEMBER; break;
         case "Z": type = RCConditionType.RC_CONDITION_RESET_NEXT_IF; break;
         case "G": type = RCConditionType.RC_CONDITION_MEASURED; break;
+        default:
+          console.warn(`[rcheevos] Unknown condition prefix: "${prefix}" at pos ${cursor.pos} in "${str}"`);
+          break;
       }
-      str = str.substring(2);
+      cursor.pos += 2;
+    }
+
+    const operand1 = this.parseOperand(cursor, memrefs);
+    const operator = this.parseOperator(cursor);
+
+    let operand2: RCOperand = {
+      type: RCOperandType.RC_OPERAND_CONST,
+      size: RCMemSize.RC_MEMSIZE_32_BITS,
+      value: { num: 1 },
+    };
+
+    if (operator !== RCOperator.RC_OPERATOR_NONE) {
+      operand2 = this.parseOperand(cursor, memrefs);
     }
 
     let requiredHits = 0;
-    const parenHitMatch = str.match(/\((\d+)\)$/);
-    const dotHitMatch = str.match(/\.(\d+)\.$/);
-
-    if (parenHitMatch) {
-      requiredHits = parseInt(parenHitMatch[1], 10) || 0;
-      str = str.replace(/\((\d+)\)$/, "").trim();
-    } else if (dotHitMatch) {
-      requiredHits = parseInt(dotHitMatch[1], 10) || 0;
-      str = str.replace(/\.(\d+)\.$/, "").trim();
+    if (cursor.pos < str.length) {
+      if (str[cursor.pos] === "(") {
+        cursor.pos++;
+        const rest = str.substring(cursor.pos);
+        const match = rest.match(/^([0-9]+)\)/);
+        if (match) {
+          requiredHits = parseInt(match[1], 10) || 0;
+          cursor.pos += match[0].length;
+        }
+      } else if (str[cursor.pos] === ".") {
+        cursor.pos++;
+        const rest = str.substring(cursor.pos);
+        const match = rest.match(/^([0-9]+)\./);
+        if (match) {
+          requiredHits = parseInt(match[1], 10) || 0;
+          cursor.pos += match[0].length;
+        }
+      }
     }
-
-    const opMatch = str.match(/(!=|==|<=|>=|=|<|>)/);
-    let operator: RCOperator = RCOperator.RC_OPERATOR_EQ;
-    let leftStr = str;
-    let rightStr = "0";
-
-    if (opMatch) {
-      const opStr = opMatch[1];
-      if (opStr === "=" || opStr === "==") operator = RCOperator.RC_OPERATOR_EQ;
-      else if (opStr === "!=") operator = RCOperator.RC_OPERATOR_NE;
-      else if (opStr === "<") operator = RCOperator.RC_OPERATOR_LT;
-      else if (opStr === "<=") operator = RCOperator.RC_OPERATOR_LE;
-      else if (opStr === ">") operator = RCOperator.RC_OPERATOR_GT;
-      else if (opStr === ">=") operator = RCOperator.RC_OPERATOR_GE;
-
-      const parts = str.split(opStr);
-      leftStr = parts[0];
-      rightStr = parts[1];
-    } else {
-      operator = RCOperator.RC_OPERATOR_NE;
-      leftStr = str;
-      rightStr = "0";
-    }
-
-    const operand1 = this.parseOperand(leftStr, memrefs);
-    const operand2 = this.parseOperand(rightStr, memrefs);
 
     return {
       operand1,
@@ -325,10 +668,9 @@ export class RCheevosEngine {
   }
 
   public static parseCondSet(
-    groupStr: string,
+    cursor: ParseCursor,
     memrefs: Map<number, RCMemRef>
   ): RCCondSet {
-    const clauses = groupStr.split("_");
     const conditions: RCCondition[] = [];
     let numPauseConditions = 0;
     let numResetConditions = 0;
@@ -337,9 +679,14 @@ export class RCheevosEngine {
     let numOtherConditions = 0;
     let numIndirectConditions = 0;
 
-    for (const cl of clauses) {
-      const cond = this.parseCondition(cl, memrefs);
-      if (!cond) continue;
+    while (cursor.pos < cursor.str.length && cursor.str[cursor.pos] !== "S") {
+      if (cursor.str[cursor.pos] === "_") {
+        cursor.pos++;
+        continue;
+      }
+
+      const cond = this.parseCondition(cursor, memrefs);
+      if (!cond) break;
       conditions.push(cond);
 
       const classification = this.classifyCondition(cond);
@@ -377,192 +724,38 @@ export class RCheevosEngine {
     };
   }
 
-  public static testCondSet(
-    condset: RCCondSet,
-    evalState: RCEvalState,
-    allCondSets: RCCondSet[],
-    groupName: string = "Core"
-  ): { pass: boolean; debug: RCheevosGroupDebug } {
-    evalState.measuredValue.type = "NONE";
-    evalState.addHits = 0;
-    evalState.isTrue = true;
-    evalState.isPrimed = true;
-    evalState.isPaused = false;
-    evalState.canMeasure = true;
-    evalState.measuredFromHits = false;
-    evalState.andNext = true;
-    evalState.orNext = false;
-    evalState.resetNext = false;
-    evalState.stopProcessing = false;
-
-    const condDebugs: RCheevosCondDebug[] = [];
-
-    // 1. Evaluate PauseIf conditions
-    for (let i = 0; i < condset.conditions.length; i++) {
-      const cond = condset.conditions[i];
-      if (cond.type === RCConditionType.RC_CONDITION_PAUSE_IF) {
-        const hitsBefore = cond.currentHits;
-        const condPass = this.testCondition(cond);
-        condDebugs.push({
-          index: i + 1,
-          type: "PauseIf",
-          op: RCOperator[cond.operator],
-          leftAddr: cond.operand1.type === RCOperandType.RC_OPERAND_CONST ? "const" : `0x${cond.operand1.value.num.toString(16).toUpperCase()}`,
-          leftVal: this.evaluateOperand(cond.operand1),
-          rightVal: this.evaluateOperand(cond.operand2),
-          hitsBefore,
-          hitsAfter: cond.currentHits,
-          requiredHits: cond.requiredHits,
-          rawPass: condPass,
-          finalPass: false,
-        });
-
-        if (condPass) {
-          evalState.isPaused = true;
-          evalState.isTrue = false;
-          evalState.isPrimed = false;
-          condset.isPaused = true;
-          return {
-            pass: false,
-            debug: {
-              groupName,
-              isPaused: true,
-              wasReset: false,
-              passed: false,
-              conditions: condDebugs,
-            },
-          };
-        }
-      }
-    }
-
-    // 2. Evaluate ResetIf conditions
-    for (let i = 0; i < condset.conditions.length; i++) {
-      const cond = condset.conditions[i];
-      if (cond.type === RCConditionType.RC_CONDITION_RESET_IF) {
-        const hitsBefore = cond.currentHits;
-        const condPass = this.testCondition(cond);
-        condDebugs.push({
-          index: i + 1,
-          type: "ResetIf",
-          op: RCOperator[cond.operator],
-          leftAddr: cond.operand1.type === RCOperandType.RC_OPERAND_CONST ? "const" : `0x${cond.operand1.value.num.toString(16).toUpperCase()}`,
-          leftVal: this.evaluateOperand(cond.operand1),
-          rightVal: this.evaluateOperand(cond.operand2),
-          hitsBefore,
-          hitsAfter: cond.currentHits,
-          requiredHits: cond.requiredHits,
-          rawPass: condPass,
-          finalPass: false,
-        });
-
-        if (condPass) {
-          cond.isTrue |= 0x02;
-          evalState.isTrue = false;
-          evalState.isPrimed = false;
-          evalState.wasReset = true;
-
-          for (const cs of allCondSets) {
-            for (const c of cs.conditions) {
-              c.currentHits = 0;
-            }
-          }
-          return {
-            pass: false,
-            debug: {
-              groupName,
-              isPaused: false,
-              wasReset: true,
-              passed: false,
-              conditions: condDebugs,
-            },
-          };
-        }
-      }
-    }
-
-    // 3. Evaluate Requirement Conditions
-    let hasRequirementCond = false;
-
-    for (let i = 0; i < condset.conditions.length; i++) {
-      const cond = condset.conditions[i];
-
-      if (
-        cond.type === RCConditionType.RC_CONDITION_PAUSE_IF ||
-        cond.type === RCConditionType.RC_CONDITION_RESET_IF
-      ) {
-        continue;
-      }
-
-      hasRequirementCond = true;
-      const hitsBefore = cond.currentHits;
-      const rawPass = this.testCondition(cond);
-
-      if (cond.requiredHits > 0) {
-        if (rawPass && cond.currentHits < cond.requiredHits) {
-          cond.currentHits++;
-        }
-      }
-
-      let condPass = false;
-      if (cond.requiredHits > 0) {
-        condPass = cond.currentHits >= cond.requiredHits;
-      } else {
-        condPass = rawPass;
-      }
-
-      condDebugs.push({
-        index: i + 1,
-        type: RCConditionType[cond.type],
-        op: RCOperator[cond.operator],
-        leftAddr: cond.operand1.type === RCOperandType.RC_OPERAND_CONST ? "const" : `0x${cond.operand1.value.num.toString(16).toUpperCase()}`,
-        leftVal: this.evaluateOperand(cond.operand1),
-        rightVal: this.evaluateOperand(cond.operand2),
-        hitsBefore,
-        hitsAfter: cond.currentHits,
-        requiredHits: cond.requiredHits,
-        rawPass,
-        finalPass: condPass,
-      });
-
-      if (!condPass) {
-        evalState.isTrue = false;
-        evalState.isPrimed = false;
-      }
-    }
-
-    if (!hasRequirementCond) {
-      evalState.isTrue = false;
-    }
-
-    return {
-      pass: evalState.isTrue,
-      debug: {
-        groupName,
-        isPaused: false,
-        wasReset: false,
-        passed: evalState.isTrue,
-        conditions: condDebugs,
-      },
-    };
-  }
-
   public static parseTrigger(triggerStr: string): RCTrigger {
+    console.group("%c[RA rcheevos Parse Trigger]", "color: #3b82f6; font-weight: bold; font-size: 13px;");
+    console.log("%cRaw Trigger String:", "font-weight: bold; color: #a855f7;", triggerStr);
+
     const memrefs = new Map<number, RCMemRef>();
-    const altGroupStrings = triggerStr.split(/S|\|/);
-    const coreStr = altGroupStrings.shift() || "";
+    const cursor: ParseCursor = { str: triggerStr.trim(), pos: 0 };
 
-    let requirement: RCCondSet | null = null;
-    if (coreStr.trim()) {
-      requirement = this.parseCondSet(coreStr, memrefs);
-    }
-
+    const requirement = this.parseCondSet(cursor, memrefs);
     const alternative: RCCondSet[] = [];
-    for (const altStr of altGroupStrings) {
-      if (altStr.trim()) {
-        alternative.push(this.parseCondSet(altStr, memrefs));
+
+    while (cursor.pos < cursor.str.length && cursor.str[cursor.pos] === "S") {
+      cursor.pos++; // Skip 'S'
+      const altSet = this.parseCondSet(cursor, memrefs);
+      if (altSet.conditions.length > 0) {
+        alternative.push(altSet);
       }
     }
+
+    console.log("%cParsing Result:", "font-weight: bold; color: #22c55e;", {
+      requirementConditions: requirement.conditions.length,
+      altGroupCount: alternative.length,
+      totalMemRefs: memrefs.size,
+      parsedLength: cursor.pos,
+      totalLength: cursor.str.length,
+    });
+
+    const memSummary: string[] = [];
+    for (const [addr, memref] of memrefs.entries()) {
+      memSummary.push(`0x${addr.toString(16).toUpperCase()} (${RCMemSize[memref.value.size]})`);
+    }
+    console.log("%cMemrefs Registered:", "font-weight: bold;", memSummary);
+    console.groupEnd();
 
     return {
       requirement,

@@ -350,6 +350,7 @@ function installAudioTap() {
     caps: new WeakMap(),
     last: null as AudioContext | null,
   });
+  if (typeof AudioNode === "undefined") return;
   const origConnect = AudioNode.prototype.connect;
 
   AudioNode.prototype.connect = function (this: AudioNode, target: any) {

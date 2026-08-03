@@ -87,7 +87,7 @@ describe("RetroAchievementsManager Notification Logic", () => {
     const gameNotif = manager.notifications.value.find((n) => n.type === "game_detected");
     expect(gameNotif).toBeDefined();
     expect(gameNotif?.title).toBe("Super Mario World");
-    expect(gameNotif?.subtitle).toBe("1 / 2 achievements débloqués (50%)");
+    expect(gameNotif?.subtitle).toBe("1 / 2 succès débloqués (50%)");
   });
 
   it("prevents duplicate set detection notifications for the same session", async () => {

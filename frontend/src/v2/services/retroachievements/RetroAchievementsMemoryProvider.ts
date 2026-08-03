@@ -47,7 +47,7 @@ export function logWASMBinaryDetails() {
 
 /**
  * Strategy 1: EmulatorJSMemoryProvider
- * Scans WASM linear memory string table for C constants and tests EmulatorJSGetMemoryData(key).
+ * Tests standard Libretro memory key constants on EmulatorJSGetMemoryData(key).
  */
 export class EmulatorJSMemoryProvider implements IMemoryProvider {
   public name = "EmulatorJS Custom Memory API Provider";
@@ -66,53 +66,47 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
       typeof asm?._get_memory_data === "function";
   }
 
-  public extractWasmStrings(heap: Uint8Array): string[] {
-    const extracted: Set<string> = new Set();
-    const maxOffset = Math.min(heap.length, 0x100000); // Scan first 1MB WASM data section
-    let currentStr = "";
-
-    for (let i = 0x400; i < maxOffset; i++) {
-      const b = heap[i];
-      if (b >= 0x20 && b <= 0x7E) {
-        currentStr += String.fromCharCode(b);
-      } else {
-        if (currentStr.length >= 2 && currentStr.length <= 32) {
-          if (/^[a-zA-Z0-9_\-\.]+$/.test(currentStr)) {
-            extracted.add(currentStr);
-          }
-        }
-        currentStr = "";
-      }
-    }
-    return Array.from(extracted);
-  }
-
   public resolve(): boolean {
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     if (!mod || !mod.HEAPU8) return false;
 
     const asm = mod.asm || mod.wasmExports || {};
-    const extractedStrings = this.extractWasmStrings(mod.HEAPU8);
     const validKeys: { key: string; result: any; pointer: number; size: number }[] = [];
 
     const fnToTest = mod.EmulatorJSGetMemoryData || asm.EmulatorJSGetMemoryData || mod._get_memory_data || asm._get_memory_data;
 
+    const knownKeys = [
+      "RETRO_MEMORY_SYSTEM_RAM",
+      "RETRO_MEMORY_SAVE_RAM",
+      "RETRO_MEMORY_VIDEO_RAM",
+      "RETRO_MEMORY_RTC",
+      "SYSTEM_RAM",
+      "SAVE_RAM",
+      "VIDEO_RAM",
+      "RTC",
+      "RAM",
+      "wram",
+      "vram",
+      "sram",
+      "hram",
+    ];
+
     if (typeof fnToTest === "function") {
-      for (const strKey of extractedStrings) {
+      for (const strKey of knownKeys) {
         try {
           const res = fnToTest(strKey);
           if (res !== null && res !== undefined) {
             let ptr = 0;
-            let sz = 2048;
+            let sz = 0x80000;
             if (typeof res === "number" && res > 0 && res < mod.HEAPU8.length) {
               ptr = res;
             } else if (res instanceof Uint8Array || ArrayBuffer.isView(res)) {
               ptr = (res as any).byteOffset || 0;
-              sz = (res as any).byteLength || 2048;
+              sz = (res as any).byteLength || 0x80000;
             } else if (typeof res === "object" && (res.buffer || res.pointer)) {
               ptr = res.byteOffset || res.pointer || 0;
-              sz = res.byteLength || res.size || 2048;
+              sz = res.byteLength || res.size || 0x80000;
             }
 
             if (ptr > 0 || (typeof res === "object" && res)) {
@@ -137,7 +131,7 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
         console.log(`%ckey: "${vk.key}", pointer: 0x${vk.pointer.toString(16).toUpperCase()}, size: ${vk.size}`, "color: #22c55e; font-weight: bold;");
       }
     } else {
-      console.log(`Scanned ${extractedStrings.length} WASM string constants. Awaiting key match...`);
+      console.log(`Tested ${knownKeys.length} known Libretro memory key constants. Awaiting key match...`);
     }
     console.groupEnd();
 
@@ -149,7 +143,7 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     const heap = mod?.HEAPU8;
-    const ptr = this.ramOffset + (address & 0x07ff);
+    const ptr = this.ramOffset + address;
     if (!heap || ptr >= heap.length) return 0;
     let val = heap[ptr];
     if (bit !== undefined && bit !== null && bit >= 0 && bit <= 7) {
@@ -163,7 +157,7 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     const heap = mod?.HEAPU8;
-    const ptr = this.ramOffset + (address & 0x07ff);
+    const ptr = this.ramOffset + address;
     if (!heap || ptr + 1 >= heap.length) return 0;
     return endian === "little" ? heap[ptr] | (heap[ptr + 1] << 8) : (heap[ptr] << 8) | heap[ptr + 1];
   }
@@ -173,7 +167,7 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     const heap = mod?.HEAPU8;
-    const ptr = this.ramOffset + (address & 0x07ff);
+    const ptr = this.ramOffset + address;
     if (!heap || ptr + 3 >= heap.length) return 0;
     return endian === "little"
       ? (heap[ptr] | (heap[ptr + 1] << 8) | (heap[ptr + 2] << 16) | (heap[ptr + 3] << 24)) >>> 0
@@ -222,7 +216,7 @@ export class LibretroMemoryProvider implements IMemoryProvider {
       const ptr = getData(sysId);
       if (typeof ptr === "number" && ptr > 0) {
         this.ramOffset = ptr;
-        this.ramSize = 2048;
+        this.ramSize = 0x80000;
         this.isResolvedState = true;
         return true;
       }
@@ -235,7 +229,7 @@ export class LibretroMemoryProvider implements IMemoryProvider {
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     const heap = mod?.HEAPU8;
-    const ptr = this.ramOffset + (address & 0x07ff);
+    const ptr = this.ramOffset + address;
     if (!heap || ptr >= heap.length) return 0;
     let val = heap[ptr];
     if (bit !== undefined && bit !== null && bit >= 0 && bit <= 7) {
@@ -249,7 +243,7 @@ export class LibretroMemoryProvider implements IMemoryProvider {
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     const heap = mod?.HEAPU8;
-    const ptr = this.ramOffset + (address & 0x07ff);
+    const ptr = this.ramOffset + address;
     if (!heap || ptr + 1 >= heap.length) return 0;
     return endian === "little" ? heap[ptr] | (heap[ptr + 1] << 8) : (heap[ptr] << 8) | heap[ptr + 1];
   }
@@ -259,7 +253,7 @@ export class LibretroMemoryProvider implements IMemoryProvider {
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     const heap = mod?.HEAPU8;
-    const ptr = this.ramOffset + (address & 0x07ff);
+    const ptr = this.ramOffset + address;
     if (!heap || ptr + 3 >= heap.length) return 0;
     return endian === "little"
       ? (heap[ptr] | (heap[ptr + 1] << 8) | (heap[ptr + 2] << 16) | (heap[ptr + 3] << 24)) >>> 0
@@ -307,7 +301,7 @@ export class EmulatorJSWasmMemoryProvider implements IMemoryProvider {
         const val = mod[k];
         if (typeof val === "number" && val > 0 && val < (mod.HEAPU8?.length || 0)) {
           this.ramOffset = val;
-          this.ramSize = 2048;
+          this.ramSize = 0x80000;
           this.isResolvedState = true;
           return true;
         }
@@ -322,7 +316,7 @@ export class EmulatorJSWasmMemoryProvider implements IMemoryProvider {
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     const heap = mod?.HEAPU8;
-    const ptr = this.ramOffset + (address & 0x07ff);
+    const ptr = this.ramOffset + address;
     if (!heap || ptr >= heap.length) return 0;
     let val = heap[ptr];
     if (bit !== undefined && bit !== null && bit >= 0 && bit <= 7) {
@@ -336,7 +330,7 @@ export class EmulatorJSWasmMemoryProvider implements IMemoryProvider {
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     const heap = mod?.HEAPU8;
-    const ptr = this.ramOffset + (address & 0x07ff);
+    const ptr = this.ramOffset + address;
     if (!heap || ptr + 1 >= heap.length) return 0;
     return endian === "little" ? heap[ptr] | (heap[ptr + 1] << 8) : (heap[ptr] << 8) | heap[ptr + 1];
   }
@@ -346,7 +340,7 @@ export class EmulatorJSWasmMemoryProvider implements IMemoryProvider {
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     const heap = mod?.HEAPU8;
-    const ptr = this.ramOffset + (address & 0x07ff);
+    const ptr = this.ramOffset + address;
     if (!heap || ptr + 3 >= heap.length) return 0;
     return endian === "little"
       ? (heap[ptr] | (heap[ptr + 1] << 8) | (heap[ptr + 2] << 16) | (heap[ptr + 3] << 24)) >>> 0
@@ -385,7 +379,7 @@ export class CoreSpecificMemoryProvider implements IMemoryProvider {
                 const ptr = fn(sysId);
                 if (typeof ptr === "number" && ptr > 0x10000 && ptr < mod.HEAPU8.length) {
                   this.ramOffset = ptr;
-                  this.ramSize = 2048;
+                  this.ramSize = 0x80000;
                   this.isResolvedState = true;
                   return true;
                 }
@@ -407,7 +401,7 @@ export class CoreSpecificMemoryProvider implements IMemoryProvider {
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     const heap = mod?.HEAPU8;
-    const ptr = this.ramOffset + (address & 0x07ff);
+    const ptr = this.ramOffset + address;
     if (!heap || ptr >= heap.length) return 0;
     let val = heap[ptr];
     if (bit !== undefined && bit !== null && bit >= 0 && bit <= 7) {
@@ -421,7 +415,7 @@ export class CoreSpecificMemoryProvider implements IMemoryProvider {
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     const heap = mod?.HEAPU8;
-    const ptr = this.ramOffset + (address & 0x07ff);
+    const ptr = this.ramOffset + address;
     if (!heap || ptr + 1 >= heap.length) return 0;
     return endian === "little" ? heap[ptr] | (heap[ptr + 1] << 8) : (heap[ptr] << 8) | heap[ptr + 1];
   }
@@ -431,7 +425,7 @@ export class CoreSpecificMemoryProvider implements IMemoryProvider {
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     const heap = mod?.HEAPU8;
-    const ptr = this.ramOffset + (address & 0x07ff);
+    const ptr = this.ramOffset + address;
     if (!heap || ptr + 3 >= heap.length) return 0;
     return endian === "little"
       ? (heap[ptr] | (heap[ptr + 1] << 8) | (heap[ptr + 2] << 16) | (heap[ptr + 3] << 24)) >>> 0
@@ -441,12 +435,12 @@ export class CoreSpecificMemoryProvider implements IMemoryProvider {
 
 /**
  * Strategy 5: WasmHeapScannerProvider
- * Live HEAPU8 snapshot mutation scanner to detect dynamic 2048-byte NES RAM regions during active gameplay.
+ * Live HEAPU8 snapshot mutation scanner to detect dynamic RAM regions during active gameplay.
  */
 export class WasmHeapScannerProvider implements IMemoryProvider {
   public name = "WASM Heap Pointer Scanner Provider";
   public ramOffset: number = 0;
-  public ramSize: number = 2048;
+  public ramSize: number = 0x80000;
   public isResolvedState: boolean = false;
 
   private firstSnapshot: Uint8Array | null = null;
@@ -500,14 +494,12 @@ export class WasmHeapScannerProvider implements IMemoryProvider {
       this.isResolvedState = true;
 
       console.group("%c[RA HEAP Scanner Candidates]", "color: #ec4899; font-weight: bold; font-size: 14px;");
-      console.log(`%cFound ${candidateOffsets.length} active 2KB RAM candidate regions!`, "color: #22c55e; font-weight: bold;");
+      console.log(`%cFound ${candidateOffsets.length} active RAM candidate regions!`, "color: #22c55e; font-weight: bold;");
       console.log("%cTop Candidate #1:", "font-weight: bold;", {
         offset: `0x${bestCandidate.offset.toString(16).toUpperCase()}`,
         mutationsPerSec: bestCandidate.mutations,
         "readByte(0x0000)": heap[bestCandidate.offset],
-        "readByte(0x0009) [frameCounter]": heap[bestCandidate.offset + 0x0009],
-        "readByte(0x075A)": heap[bestCandidate.offset + 0x075a],
-        "readByte(0x07FF)": heap[bestCandidate.offset + 0x07ff],
+        "readByte(0x0009)": heap[bestCandidate.offset + 0x0009],
       });
       console.log("%cAll Candidates:", "font-weight: bold;", candidateOffsets.map(c => `0x${c.offset.toString(16).toUpperCase()} (${c.mutations} mut/s)`));
       console.groupEnd();
@@ -523,7 +515,7 @@ export class WasmHeapScannerProvider implements IMemoryProvider {
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     const heap = mod?.HEAPU8;
-    const ptr = this.ramOffset + (address & 0x07ff);
+    const ptr = this.ramOffset + address;
     if (!heap || ptr >= heap.length) return 0;
     let val = heap[ptr];
     if (bit !== undefined && bit !== null && bit >= 0 && bit <= 7) {
@@ -537,7 +529,7 @@ export class WasmHeapScannerProvider implements IMemoryProvider {
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     const heap = mod?.HEAPU8;
-    const ptr = this.ramOffset + (address & 0x07ff);
+    const ptr = this.ramOffset + address;
     if (!heap || ptr + 1 >= heap.length) return 0;
     return endian === "little" ? heap[ptr] | (heap[ptr + 1] << 8) : (heap[ptr] << 8) | heap[ptr + 1];
   }
@@ -547,7 +539,7 @@ export class WasmHeapScannerProvider implements IMemoryProvider {
     const emu = (window as any).EJS_emulator;
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     const heap = mod?.HEAPU8;
-    const ptr = this.ramOffset + (address & 0x07ff);
+    const ptr = this.ramOffset + address;
     if (!heap || ptr + 3 >= heap.length) return 0;
     return endian === "little"
       ? (heap[ptr] | (heap[ptr + 1] << 8) | (heap[ptr + 2] << 16) | (heap[ptr + 3] << 24)) >>> 0

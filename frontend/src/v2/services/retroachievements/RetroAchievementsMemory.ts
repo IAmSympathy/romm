@@ -99,11 +99,12 @@ export class RetroAchievementsMemory {
    */
   public mapAddress(address: number): number {
     const core = this.activeCore;
-    if (core.includes("snes")) return address & 0x1ffff;
-    if (core.includes("sega") || core.includes("genesis") || core.includes("megadrive")) return address & 0xffff;
-    if (core.includes("gb") || core.includes("gambatte")) return address & 0x7fff;
-    if (core.includes("gba") || core.includes("vba")) return address >= 0x02000000 ? (address - 0x02000000) & 0x3ffff : address & 0x3ffff;
-    if (core.includes("nes") || core.includes("fceumm") || core.includes("nestopia")) return address & 0x07ff;
+    if (core.includes("snes") || core.includes("bsnes")) return address & 0x1ffff;
+    if (core.includes("sega") || core.includes("genesis") || core.includes("megadrive") || core.includes("picodrive")) return address & 0xffff;
+    if (core.includes("gb") || core.includes("gambatte") || core.includes("sameboy") || core.includes("gearboy")) return address & 0xffff;
+    if (core.includes("gba") || core.includes("vba") || core.includes("mgba")) return address >= 0x02000000 ? (address - 0x02000000) & 0x3ffff : address & 0x3ffff;
+    if (core.includes("n64") || core.includes("mupen64plus")) return address & 0x7fffff;
+    if (core.includes("nes") || core.includes("fceumm") || core.includes("nestopia") || core.includes("mesen")) return address & 0x07ff;
     return address;
   }
 
