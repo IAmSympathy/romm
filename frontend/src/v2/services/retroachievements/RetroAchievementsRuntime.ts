@@ -48,36 +48,72 @@ export class RetroAchievementsRuntime {
   }
 
   /**
-   * Load and parse achievements list, strictly deduplicating by ID, trigger string, and title.
+   * Load and parse achievements list with detailed diagnostic output and robust deduplication.
+   * Prefer official non-copy entries and lower IDs when duplicates exist.
    */
   public loadAchievements(rawAchievements: any[]) {
     this.achievements = [];
-    const seenIds = new Set<number>();
-    const seenTriggers = new Set<string>();
+    const mapByDedupKey = new Map<string, MonitoredAchievement>();
+
+    console.group("%c[RA Runtime] loadAchievements Diagnostic", "color: #3b82f6; font-weight: bold; font-size: 13px;");
+    console.log(`[RA Runtime] Total raw achievements fetched from API: ${rawAchievements.length}`);
 
     for (const raw of rawAchievements) {
       const ach = this.parseAchievement(raw);
-
-      // Skip invalid or unparsed achievements
       if (!ach.id || !ach.triggerStr) continue;
 
-      // Deduplicate by ID
-      if (seenIds.has(ach.id)) continue;
+      const normTitle = ach.title
+        .toLowerCase()
+        .replace(/\(copy\)/gi, "")
+        .replace(/\[copy\]/gi, "")
+        .replace(/[^a-z0-9]/g, "");
 
-      // Deduplicate logical duplicate triggers & copies (e.g. "I'm A Super Star! (copy)")
-      const cleanTitle = ach.title.toLowerCase().replace(/\(copy\)/g, "").trim();
-      const normKey = `${cleanTitle}:${ach.triggerStr}`;
+      const normTrigger = ach.triggerStr.toUpperCase().replace(/\s+/g, "");
+      const dedupKey = `${normTitle}::${normTrigger}`;
+      const isCopy = ach.title.toLowerCase().includes("(copy)") || ach.title.toLowerCase().includes("[copy]");
 
-      if (seenTriggers.has(normKey) || seenTriggers.has(ach.triggerStr)) {
-        console.log(`[RA Runtime] Deduplicated copy/duplicate achievement "${ach.title}" (ID: ${ach.id})`);
-        continue;
+      console.log(
+        `%c[RA Item] ID: ${ach.id} | Original Title: "${ach.title}" | Clean Title: "${normTitle}" | Key: "${dedupKey}" | isCopy: ${isCopy}`,
+        "color: #64748b;"
+      );
+
+      if (!mapByDedupKey.has(dedupKey)) {
+        mapByDedupKey.set(dedupKey, ach);
+      } else {
+        const existing = mapByDedupKey.get(dedupKey)!;
+        const existingIsCopy =
+          existing.title.toLowerCase().includes("(copy)") || existing.title.toLowerCase().includes("[copy]");
+
+        // Priority logic:
+        // 1. Prefer non-copy over copy
+        // 2. If both are non-copy or both are copy, prefer lower ID (official achievement)
+        if (existingIsCopy && !isCopy) {
+          console.log(
+            `%c[RA Dedup REPLACED] Preferred official ID:${ach.id} ("${ach.title}") over copy ID:${existing.id} ("${existing.title}")`,
+            "color: #eab308; font-weight: bold;"
+          );
+          mapByDedupKey.set(dedupKey, ach);
+        } else if (existingIsCopy === isCopy && ach.id < existing.id) {
+          console.log(
+            `%c[RA Dedup REPLACED] Preferred lower official ID:${ach.id} over higher ID:${existing.id} for "${ach.title}"`,
+            "color: #06b6d4; font-weight: bold;"
+          );
+          mapByDedupKey.set(dedupKey, ach);
+        } else {
+          console.log(
+            `%c[RA Dedup DISCARDED] Ignored duplicate ID:${ach.id} ("${ach.title}") in favor of active ID:${existing.id} ("${existing.title}")`,
+            "color: #94a3b8;"
+          );
+        }
       }
-
-      seenIds.add(ach.id);
-      seenTriggers.add(normKey);
-      seenTriggers.add(ach.triggerStr);
-      this.achievements.push(ach);
     }
+
+    this.achievements = Array.from(mapByDedupKey.values());
+    console.log(
+      `%c[RA Runtime] Final deduplicated achievements count: ${this.achievements.length}`,
+      "color: #22c55e; font-weight: bold; font-size: 13px;"
+    );
+    console.groupEnd();
   }
 
   /**
