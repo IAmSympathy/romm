@@ -21,36 +21,101 @@ export interface IMemoryProvider {
  */
 export function logWASMBinaryDetails() {
   const emu = (window as any).EJS_emulator;
-  const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
-  if (!mod) return;
+  const gameMgr = emu?.gameManager;
+  const mod = gameMgr?.Module || emu?.Module || (window as any).Module;
+  const asm = mod?.asm || mod?.wasmExports || {};
 
-  const asm = mod.asm || mod.wasmExports || {};
-  const allModKeys = Object.keys(mod);
-  const allAsmKeys = Object.keys(asm);
-  const combinedKeys = Array.from(new Set(allModKeys.concat(allAsmKeys)));
+  console.group("%c[RA WASM & EmulatorJS Direct Binary & Buffer Inspection]", "color: #9333ea; font-weight: bold; font-size: 14px;");
 
-  console.group("%c[RA WASM Deep Binary Inspection]", "color: #9333ea; font-weight: bold; font-size: 14px;");
+  // 1. Raw WASM export keys
+  const asmKeys = Object.keys(asm);
+  const modKeys = mod ? Object.keys(mod) : [];
+  console.log("%c[Module.asm keys count]:", "font-weight: bold; color: #10b981;", asmKeys.length, asmKeys);
+  console.log("%c[Module.wasmExports keys count]:", "font-weight: bold; color: #10b981;", mod?.wasmExports ? Object.keys(mod.wasmExports).length : 0, mod?.wasmExports ? Object.keys(mod.wasmExports) : []);
 
-  for (const fnName of ["EmulatorJSGetMemoryData", "_get_memory_data", "retro_get_memory_data", "_retro_get_memory_data"]) {
-    const fn = mod[fnName] || asm[fnName];
-    if (typeof fn === "function") {
-      console.log(`%c[Function Source Dump] ${fnName}:`, "font-weight: bold; color: #a855f7;", {
-        length: fn.length,
-        source: fn.toString(),
-      });
-    } else {
-      console.log(`[Function Source Dump] ${fnName}: Missing`);
+  // 2. Function name matcher (keywords: memory, ram, read, write, cpu, bus, gb, gambatte)
+  const fnKeywords = ["memory", "ram", "read", "write", "cpu", "bus", "gb", "gambatte"];
+  const searchFunctionsInObject = (obj: any, label: string) => {
+    if (!obj) return;
+    const matchedFns: { name: string; fnLength: number }[] = [];
+    for (const k of Object.keys(obj)) {
+      try {
+        if (typeof obj[k] === "function") {
+          const lk = k.toLowerCase();
+          if (fnKeywords.some((kw) => lk.includes(kw))) {
+            matchedFns.push({ name: k, fnLength: obj[k].length });
+          }
+        }
+      } catch {}
     }
-  }
+    console.log(`%c[Function Key Search: ${label}] (${matchedFns.length} functions matched):`, "font-weight: bold; color: #06b6d4;", matchedFns);
+  };
 
-  const searchKeywords = ["memory", "ram", "system", "save", "work", "cpu"];
-  const matchingKeys = combinedKeys.filter((k) => {
-    const lk = k.toLowerCase();
-    return searchKeywords.some((kw) => lk.includes(kw));
-  });
+  searchFunctionsInObject(emu, "window.EJS_emulator");
+  searchFunctionsInObject(gameMgr, "EJS_emulator.gameManager");
+  searchFunctionsInObject(mod, "Module");
+  searchFunctionsInObject(asm, "Module.asm / wasmExports");
 
-  console.log("%c[Keys matching memory/ram/system/save/work/cpu]:", "font-weight: bold; color: #3b82f6;", matchingKeys);
-  console.log("%c[Complete WASM Export List]:", "font-weight: bold;", allAsmKeys);
+  // 3. TypedArray, ArrayBuffer, WebAssembly.Memory, and Numeric Pointer inspection
+  const inspectBuffersAndNumbers = (obj: any, label: string) => {
+    if (!obj) return;
+    const inspected: any[] = [];
+    for (const k of Object.keys(obj)) {
+      try {
+        const val = obj[k];
+        if (!val) continue;
+
+        if (typeof val === "object" || typeof val === "function" || typeof val === "number") {
+          let typeName = typeof val;
+          let byteLen = 0;
+          let len = 0;
+          let isTargetMatch = false;
+
+          if (val instanceof Uint8Array || ArrayBuffer.isView(val)) {
+            typeName = val.constructor?.name || "TypedArray";
+            byteLen = (val as any).byteLength || 0;
+            len = (val as any).length || 0;
+          } else if (val instanceof ArrayBuffer) {
+            typeName = "ArrayBuffer";
+            byteLen = val.byteLength;
+            len = val.byteLength;
+          } else if (typeof (window as any).WebAssembly?.Memory === "function" && val instanceof (window as any).WebAssembly.Memory) {
+            typeName = "WebAssembly.Memory";
+            byteLen = val.buffer?.byteLength || 0;
+            len = val.buffer?.byteLength || 0;
+          } else if (typeof val === "number" && val > 0) {
+            typeName = "number pointer";
+            byteLen = val;
+            len = val;
+          } else {
+            continue;
+          }
+
+          if (byteLen === 8192 || len === 8192 || byteLen === 128 || len === 128 || byteLen === 127 || len === 127 || byteLen === 65536 || len === 65536) {
+            isTargetMatch = true;
+          }
+
+          inspected.push({
+            property: `${label}.${k}`,
+            type: typeName,
+            byteLength: byteLen,
+            length: len,
+            targetMatch: isTargetMatch ? "★ MATCH (WRAM/HRAM/CPU Bus)" : "No",
+          });
+        }
+      } catch {}
+    }
+    if (inspected.length > 0) {
+      console.log(`%c[Buffer & Pointer Properties: ${label}] (${inspected.length} properties):`, "font-weight: bold; color: #ec4899;");
+      console.table(inspected);
+    }
+  };
+
+  inspectBuffersAndNumbers(emu, "window.EJS_emulator");
+  inspectBuffersAndNumbers(gameMgr, "EJS_emulator.gameManager");
+  inspectBuffersAndNumbers(mod, "Module");
+  inspectBuffersAndNumbers(asm, "Module.asm / wasmExports");
+
   console.groupEnd();
 }
 
@@ -252,14 +317,12 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
       this.parsedMemoryMap = parseWasmMemoryMap(mmapPtr, heap);
     }
 
-    const fnToTest = mod.EmulatorJSGetMemoryData || asm.EmulatorJSGetMemoryData || mod._get_memory_data || asm._get_memory_data;
-    const fnSize = mod.EmulatorJSGetMemorySize || asm.EmulatorJSGetMemorySize || mod._get_memory_size || asm._get_memory_size || mod.retro_get_memory_size || asm.retro_get_memory_size;
+    const probedResults: { id: number; method: string; ptr: number; size: number; first32Hex: string; last32Hex: string }[] = [];
 
-    const probedIntegerIds: { id: number; ptr: number; size: number; first32Hex: string; last32Hex: string }[] = [];
-    if (typeof fnToTest === "function") {
+    const testGetter = (methodName: string, getFn: (id: number) => number) => {
       for (let id = 0; id <= 32; id++) {
         try {
-          const ptr = fnToTest(id);
+          const ptr = getFn(id);
           if (typeof ptr === "number" && ptr > 0 && ptr < heap.length) {
             const sz = typeof fnSize === "function" ? (fnSize(id) || 0) : 0;
             const effectiveSize = sz > 0 ? sz : 256;
@@ -272,8 +335,9 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
             for (let b = 0; b < 32 && ptr + startLast + b < heap.length; b++) {
               last32.push(heap[ptr + startLast + b].toString(16).toUpperCase().padStart(2, "0"));
             }
-            probedIntegerIds.push({
+            probedResults.push({
               id,
+              method: methodName,
               ptr,
               size: sz,
               first32Hex: first32.join(" "),
@@ -282,6 +346,20 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
           }
         } catch {}
       }
+    };
+
+    if (typeof fnToTest === "function") {
+      testGetter("fnToTest", (id) => fnToTest(id));
+    }
+    if (typeof mod._retro_get_memory_data === "function") {
+      testGetter("mod._retro_get_memory_data", (id) => mod._retro_get_memory_data(id));
+    }
+    if (typeof asm._retro_get_memory_data === "function") {
+      testGetter("asm._retro_get_memory_data", (id) => asm._retro_get_memory_data(id));
+    }
+    if (typeof mod.ccall === "function") {
+      testGetter("ccall(_retro_get_memory_data)", (id) => mod.ccall("_retro_get_memory_data", "number", ["number"], [id]));
+      testGetter("ccall(retro_get_memory_data)", (id) => mod.ccall("retro_get_memory_data", "number", ["number"], [id]));
     }
 
     console.group("%c[RA Memory Provider Selection Diagnostic]", "color: #8b5cf6; font-weight: bold; font-size: 14px;");
@@ -296,17 +374,17 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
       console.log("%cNo official retro_memory_map descriptor table exported by WASM module exports.", "color: #f59e0b; font-weight: bold;");
     }
 
-    if (probedIntegerIds.length > 0) {
-      console.log("%c[Probed Libretro Integer Memory IDs 0..32]:", "color: #06b6d4; font-weight: bold;");
-      probedIntegerIds.forEach((item) => {
+    if (probedResults.length > 0) {
+      console.log("%c[Probed Libretro Integer Memory IDs 0..32 Results]:", "color: #06b6d4; font-weight: bold;");
+      probedResults.forEach((item) => {
         console.log(
-          `  ID ${item.id}: Pointer 0x${item.ptr.toString(16).toUpperCase()} | Size: ${item.size} bytes\n` +
+          `  [${item.method}] ID ${item.id}: Pointer 0x${item.ptr.toString(16).toUpperCase()} | Size: ${item.size} bytes\n` +
           `      First 32 bytes: ${item.first32Hex}\n` +
           `      Last 32 bytes:  ${item.last32Hex}`
         );
       });
     } else {
-      console.log("%c[Probed Libretro Integer Memory IDs 0..32]: No non-zero pointers returned.", "color: #ef4444; font-weight: bold;");
+      console.log("%c[Probed Libretro Integer Memory IDs 0..32]: No non-zero pointers returned across all tested getters & ccall methods.", "color: #ef4444; font-weight: bold;");
     }
     console.groupEnd();
 
