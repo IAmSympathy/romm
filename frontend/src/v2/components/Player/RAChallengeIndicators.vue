@@ -20,9 +20,7 @@ defineProps<{
 const hoveredId = ref<number | null>(null);
 
 function onImgError(e: Event) {
-  const target = e.target as HTMLImageElement;
-  target.onerror = null;
-  target.src = "/assets/scrappers/ra.png";
+  (e.target as HTMLImageElement).src = "/assets/romm/resources/metadata_providers/ra.png";
 }
 </script>
 
