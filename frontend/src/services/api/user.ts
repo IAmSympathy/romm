@@ -130,6 +130,27 @@ async function testRetroAchievements({
   });
 }
 
+async function getRetroAchievementsGameId(userId: number, hash: string) {
+  return api.get<{ success: boolean; game_id?: number | null; error?: string }>(
+    `/users/${userId}/ra/gameid`,
+    { params: { hash } },
+  );
+}
+
+async function getRetroAchievementsPatch(userId: number, gameId: number) {
+  return api.get<{ success: boolean; patch_data?: any; error?: string }>(
+    `/users/${userId}/ra/patch`,
+    { params: { game_id: gameId } },
+  );
+}
+
+async function getRetroAchievementsUnlocks(userId: number, gameId: number) {
+  return api.get<{ success: boolean; unlocks?: number[]; error?: string }>(
+    `/users/${userId}/ra/unlocks`,
+    { params: { game_id: gameId } },
+  );
+}
+
 export default {
   createUser,
   createInviteLink,
@@ -141,4 +162,7 @@ export default {
   deleteUser,
   refreshRetroAchievements,
   testRetroAchievements,
+  getRetroAchievementsGameId,
+  getRetroAchievementsPatch,
+  getRetroAchievementsUnlocks,
 };

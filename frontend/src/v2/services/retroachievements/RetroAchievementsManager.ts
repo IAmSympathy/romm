@@ -9,12 +9,23 @@ import type {
 
 export interface SessionRomInput {
   id: number;
-  name: string;
+  name?: string | null;
+  fs_name?: string;
+  fs_extension?: string;
+  fs_size_bytes?: number;
   ra_id?: number | null;
   platform_slug?: string;
-  rom_files?: Array<{
+  files?: Array<{
+    file_name?: string;
     ra_hash?: string | null;
     md5_hash?: string | null;
+    crc_hash?: string | null;
+  }>;
+  rom_files?: Array<{
+    file_name?: string;
+    ra_hash?: string | null;
+    md5_hash?: string | null;
+    crc_hash?: string | null;
   }>;
 }
 
@@ -90,8 +101,25 @@ export class RetroAchievementsManager {
     const username = user?.ra_username?.trim();
     const token = user?.ra_token?.trim();
 
-    if (!username || !token) {
-      // User has not linked RetroAchievements account
+    const fileList = rom.files || rom.rom_files || [];
+    const mainFile = fileList[0];
+    const calculatedHash = mainFile?.ra_hash || mainFile?.md5_hash || null;
+    const originalFile = rom.fs_name || rom.name || "Unknown";
+    const detectedFormat = rom.fs_extension?.toUpperCase() || originalFile.split(".").pop()?.toUpperCase() || "UNKNOWN";
+    const extractedRom = mainFile?.file_name || originalFile;
+    const romSize = rom.fs_size_bytes || 0;
+
+    console.group("%c[RA Debug]", "color: #9333ea; font-weight: bold; font-size: 14px;");
+    console.log("%cOriginal file:", "font-weight: bold;", originalFile);
+    console.log("%cDetected format:", "font-weight: bold;", detectedFormat);
+    console.log("%cExtracted ROM:", "font-weight: bold;", extractedRom);
+    console.log("%cROM size:", "font-weight: bold;", romSize ? `${romSize} bytes` : "Unknown");
+    console.log("%cRomM ra_id:", "font-weight: bold;", rom.ra_id ?? "Not set");
+    console.log("%cCalculated RA hash:", "font-weight: bold;", calculatedHash ?? "None");
+    console.groupEnd();
+
+    if (!user?.id) {
+      console.warn("[RA Debug] User ID missing.");
       return false;
     }
 
@@ -101,15 +129,14 @@ export class RetroAchievementsManager {
     // Resolve Game ID
     let resolvedGameId: number | null = rom.ra_id ?? null;
 
-    if (!resolvedGameId && rom.rom_files && rom.rom_files.length > 0) {
-      const raHash = rom.rom_files[0]?.ra_hash || rom.rom_files[0]?.md5_hash;
-      if (raHash) {
-        resolvedGameId = await this.client.getGameIdByHash(raHash);
-      }
+    if (!resolvedGameId && calculatedHash) {
+      console.log(`[RA Debug] Request sent to RetroAchievements via RomM backend: r=gameid&m=${calculatedHash}`);
+      resolvedGameId = await this.client.getGameIdByHash(user.id, calculatedHash);
+      console.log("[RA Debug] GameID resolved by hash:", resolvedGameId);
     }
 
     if (!resolvedGameId || resolvedGameId <= 0) {
-      // ROM unknown on RetroAchievements
+      console.warn("[RA Debug] RA response: Game not found (resolvedGameId is 0 or null)");
       this.addNotification(
         "rom_unknown",
         "RetroAchievements",
@@ -122,13 +149,14 @@ export class RetroAchievementsManager {
 
     this.gameId.value = resolvedGameId;
 
-    // Fetch achievements patch data & user unlocks in parallel
+    console.log(`[RA Debug] Request sent to RetroAchievements via RomM backend: r=patch&g=${resolvedGameId}&u=${username}`);
     const [patch, unlocks] = await Promise.all([
-      this.client.getPatchData(resolvedGameId, creds),
-      this.client.getUnlocks(resolvedGameId, creds),
+      this.client.getPatchData(user.id, resolvedGameId),
+      this.client.getUnlocks(user.id, resolvedGameId),
     ]);
 
     if (!patch) {
+      console.warn("[RA Debug] RA response: Failed to fetch patch data or CORS/HTTP error");
       this.addNotification(
         "rom_unknown",
         "RetroAchievements",
@@ -151,10 +179,20 @@ export class RetroAchievementsManager {
     this.activePatch.value = patch;
     this.isInitialized.value = true;
 
-    // Show game recognized notification
     const totalCount = patch.achievements.length;
     const gameTitle = patch.title || rom.name;
 
+    // Detailed Runtime Diagnostic Log
+    console.group("%c[RA Runtime Debug]", "color: #eab308; font-weight: bold; font-size: 14px;");
+    console.log("%cNombre d'achievements chargés :", "font-weight: bold;", totalCount);
+    console.log("%cNombre d'achievements surveillés :", "font-weight: bold;", 0, "(Aucune boucle d'évaluation active)");
+    console.log("%cFréquence de vérification :", "font-weight: bold;", "0 Hz (Absence de la boucle d'update)");
+    console.log("%cValeurs mémoire lues :", "font-weight: bold;", "Non connectées (Core RAM non transmise à l'évaluateur)");
+    console.log("%cRésultat des évaluations :", "font-weight: bold;", "Aucune évaluation exécutée pendant le jeu");
+    console.log("%cAppels d'unlock envoyés :", "font-weight: bold;", 0);
+    console.groupEnd();
+
+    // Show game recognized notification
     this.addNotification(
       "game_detected",
       "RetroAchievements",

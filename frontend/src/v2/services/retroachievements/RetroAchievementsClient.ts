@@ -1,19 +1,14 @@
+import userApi from "@/services/api/user";
 import type { RAAchievement, RACredentials, RAPatchData } from "./types";
 
-const RA_HOST = "https://retroachievements.org";
 const MEDIA_HOST = "https://media.retroachievements.org";
 
 export class RetroAchievementsClient {
-  private baseUrl: string;
-
-  constructor(baseUrl: string = RA_HOST) {
-    this.baseUrl = baseUrl;
-  }
-
   /**
    * Login or test credentials against RetroAchievements API.
    */
   async login(
+    userId: number,
     username: string,
     passwordOrToken: { password?: string; token?: string },
   ): Promise<{
@@ -23,36 +18,14 @@ export class RetroAchievementsClient {
     score?: number;
     error?: string;
   }> {
-    const params = new URLSearchParams({
-      r: "login2",
-      u: username,
-    });
-    if (passwordOrToken.password) {
-      params.append("p", passwordOrToken.password);
-    } else if (passwordOrToken.token) {
-      params.append("t", passwordOrToken.token);
-    } else {
-      return { success: false, error: "Password or token is required" };
-    }
-
     try {
-      const response = await fetch(`${this.baseUrl}/dorequest.php?${params.toString()}`);
-      if (!response.ok) {
-        return { success: false, error: `HTTP ${response.status}` };
-      }
-      const data = await response.json();
-      if (data.Success) {
-        return {
-          success: true,
-          token: data.Token,
-          username: data.User || username,
-          score: data.Score || 0,
-        };
-      }
-      return {
-        success: false,
-        error: data.Error || "Invalid credentials",
-      };
+      const response = await userApi.testRetroAchievements({
+        id: userId,
+        ra_username: username,
+        ra_password: passwordOrToken.password,
+        ra_token: passwordOrToken.token,
+      });
+      return response.data;
     } catch (err: unknown) {
       return {
         success: false,
@@ -62,21 +35,14 @@ export class RetroAchievementsClient {
   }
 
   /**
-   * Get RetroAchievements Game ID by ROM hash.
+   * Get RetroAchievements Game ID by ROM hash via RomM backend.
    */
-  async getGameIdByHash(hash: string): Promise<number | null> {
+  async getGameIdByHash(userId: number, hash: string): Promise<number | null> {
     if (!hash) return null;
-    const params = new URLSearchParams({
-      r: "gameid",
-      m: hash.toLowerCase(),
-    });
-
     try {
-      const response = await fetch(`${this.baseUrl}/dorequest.php?${params.toString()}`);
-      if (!response.ok) return null;
-      const data = await response.json();
-      if (data.Success && data.GameID) {
-        return Number(data.GameID);
+      const response = await userApi.getRetroAchievementsGameId(userId, hash);
+      if (response.data.success && response.data.game_id) {
+        return Number(response.data.game_id);
       }
       return null;
     } catch (err) {
@@ -86,26 +52,17 @@ export class RetroAchievementsClient {
   }
 
   /**
-   * Get game achievements patch data.
+   * Get game achievements patch data via RomM backend.
    */
   async getPatchData(
+    userId: number,
     gameId: number,
-    creds: RACredentials,
   ): Promise<RAPatchData | null> {
-    const params = new URLSearchParams({
-      r: "patch",
-      g: String(gameId),
-      u: creds.username,
-      t: creds.token,
-    });
-
     try {
-      const response = await fetch(`${this.baseUrl}/dorequest.php?${params.toString()}`);
-      if (!response.ok) return null;
-      const data = await response.json();
-      if (!data.Success || !data.PatchData) return null;
+      const response = await userApi.getRetroAchievementsPatch(userId, gameId);
+      if (!response.data.success || !response.data.patch_data) return null;
 
-      const patch = data.PatchData;
+      const patch = response.data.patch_data;
       const achievements: RAAchievement[] = [];
 
       if (patch.Achievements && typeof patch.Achievements === "object") {
@@ -135,27 +92,17 @@ export class RetroAchievementsClient {
   }
 
   /**
-   * Get user unlocks for a specific game ID.
+   * Get user unlocks for a specific game ID via RomM backend.
    */
   async getUnlocks(
+    userId: number,
     gameId: number,
-    creds: RACredentials,
   ): Promise<Set<number>> {
-    const params = new URLSearchParams({
-      r: "unlocks",
-      g: String(gameId),
-      h: "0",
-      u: creds.username,
-      t: creds.token,
-    });
-
     const unlockedSet = new Set<number>();
     try {
-      const response = await fetch(`${this.baseUrl}/dorequest.php?${params.toString()}`);
-      if (!response.ok) return unlockedSet;
-      const data = await response.json();
-      if (data.Success && Array.isArray(data.UserUnlocks)) {
-        for (const unlockId of data.UserUnlocks) {
+      const response = await userApi.getRetroAchievementsUnlocks(userId, gameId);
+      if (response.data.success && Array.isArray(response.data.unlocks)) {
+        for (const unlockId of response.data.unlocks) {
           unlockedSet.add(Number(unlockId));
         }
       }

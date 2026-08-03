@@ -161,7 +161,10 @@ class RAHandler(MetadataHandler):
             return {"success": False, "error": "Password or token is required"}
 
         url = "https://retroachievements.org/dorequest.php"
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        headers = {
+            "User-Agent": "RetroArch/1.21.0 RomM/3.7.0",
+        }
+        async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
             try:
                 res = await client.get(url, params=params)
                 if res.status_code != 200:
@@ -181,6 +184,69 @@ class RAHandler(MetadataHandler):
                     }
             except Exception as e:
                 log.error("Failed to test RetroAchievements credentials: %s", e)
+                return {"success": False, "error": str(e)}
+
+    @staticmethod
+    async def get_game_id_by_hash(hash_val: str) -> dict[str, Any]:
+        """Resolve RetroAchievements Game ID by ROM hash using backend httpx client."""
+        import httpx
+
+        url = "https://retroachievements.org/dorequest.php"
+        params = {"r": "gameid", "m": hash_val.lower()}
+        headers = {"User-Agent": "RetroArch/1.21.0 RomM/3.7.0"}
+        async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
+            try:
+                res = await client.get(url, params=params)
+                if res.status_code != 200:
+                    return {"success": False, "error": f"HTTP error {res.status_code}"}
+                data = res.json()
+                if data.get("Success") and data.get("GameID"):
+                    return {"success": True, "game_id": int(data["GameID"])}
+                return {"success": False, "game_id": None}
+            except Exception as e:
+                log.error("Failed to get Game ID by hash: %s", e)
+                return {"success": False, "error": str(e)}
+
+    @staticmethod
+    async def get_patch_data(game_id: int, username: str, token: str) -> dict[str, Any]:
+        """Fetch RetroAchievements game patch data using backend httpx client."""
+        import httpx
+
+        url = "https://retroachievements.org/dorequest.php"
+        params = {"r": "patch", "g": str(game_id), "u": username, "t": token}
+        headers = {"User-Agent": "RetroArch/1.21.0 RomM/3.7.0"}
+        async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
+            try:
+                res = await client.get(url, params=params)
+                if res.status_code != 200:
+                    return {"success": False, "error": f"HTTP error {res.status_code}"}
+                data = res.json()
+                if data.get("Success") and data.get("PatchData"):
+                    return {"success": True, "patch_data": data["PatchData"]}
+                return {"success": False, "error": "Invalid patch response"}
+            except Exception as e:
+                log.error("Failed to fetch RA patch data: %s", e)
+                return {"success": False, "error": str(e)}
+
+    @staticmethod
+    async def get_unlocks(game_id: int, username: str, token: str) -> dict[str, Any]:
+        """Fetch RetroAchievements user unlocks using backend httpx client."""
+        import httpx
+
+        url = "https://retroachievements.org/dorequest.php"
+        params = {"r": "unlocks", "g": str(game_id), "u": username, "t": token, "h": "0"}
+        headers = {"User-Agent": "RetroArch/1.21.0 RomM/3.7.0"}
+        async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
+            try:
+                res = await client.get(url, params=params)
+                if res.status_code != 200:
+                    return {"success": False, "error": f"HTTP error {res.status_code}"}
+                data = res.json()
+                if data.get("Success"):
+                    return {"success": True, "unlocks": data.get("UserUnlocks", [])}
+                return {"success": False, "unlocks": []}
+            except Exception as e:
+                log.error("Failed to fetch RA unlocks: %s", e)
                 return {"success": False, "error": str(e)}
 
     @staticmethod

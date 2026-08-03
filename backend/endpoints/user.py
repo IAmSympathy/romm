@@ -612,3 +612,71 @@ async def test_retro_achievements(
     )
     return result
 
+
+@protected_route(
+    router.get,
+    "/{id}/ra/gameid",
+    [Scope.ME_READ],
+    status_code=status.HTTP_200_OK,
+    summary="Get RetroAchievements Game ID by hash",
+)
+async def get_retro_achievements_game_id(
+    request: Request,
+    id: Annotated[int, PathVar(description="User internal id.", ge=1)],
+    hash: str,
+) -> dict[str, Any]:
+    """Get RetroAchievements Game ID by ROM hash."""
+    return await meta_ra_handler.get_game_id_by_hash(hash_val=hash)
+
+
+@protected_route(
+    router.get,
+    "/{id}/ra/patch",
+    [Scope.ME_READ],
+    status_code=status.HTTP_200_OK,
+    summary="Get RetroAchievements patch data for a game",
+)
+async def get_retro_achievements_patch(
+    request: Request,
+    id: Annotated[int, PathVar(description="User internal id.", ge=1)],
+    game_id: int,
+) -> dict[str, Any]:
+    """Get RetroAchievements patch data (achievements) for a game ID."""
+    user = db_user_handler.get_user(id)
+    if not user or not user.ra_username or not user.ra_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="RetroAchievements account not linked",
+        )
+    return await meta_ra_handler.get_patch_data(
+        game_id=game_id,
+        username=user.ra_username,
+        token=user.ra_token,
+    )
+
+
+@protected_route(
+    router.get,
+    "/{id}/ra/unlocks",
+    [Scope.ME_READ],
+    status_code=status.HTTP_200_OK,
+    summary="Get RetroAchievements user unlocks for a game",
+)
+async def get_retro_achievements_unlocks(
+    request: Request,
+    id: Annotated[int, PathVar(description="User internal id.", ge=1)],
+    game_id: int,
+) -> dict[str, Any]:
+    """Get user unlocked achievements for a game ID."""
+    user = db_user_handler.get_user(id)
+    if not user or not user.ra_username or not user.ra_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="RetroAchievements account not linked",
+        )
+    return await meta_ra_handler.get_unlocks(
+        game_id=game_id,
+        username=user.ra_username,
+        token=user.ra_token,
+    )
+
