@@ -200,9 +200,21 @@ const earnedAchievementIds = computed<ReadonlySet<string>>(() => {
   const progression = authStore.user?.ra_progression?.results?.find(
     (r) => r.rom_ra_id === romRaId,
   );
-  return new Set((progression?.earned_achievements ?? []).map((e) => e.id));
+  return new Set((progression?.earned_achievements ?? []).map((e) => String(e.id)));
 });
 const achievementsEarned = computed(() => earnedAchievementIds.value.size);
+
+watch(
+  () => [currentRom.value?.ra_id, tab.value],
+  ([raId, activeTab]) => {
+    if (raId && authStore.user?.ra_username) {
+      if (activeTab === "achievements" || activeTab === "overview") {
+        authStore.refreshRetroAchievements(true);
+      }
+    }
+  },
+  { immediate: true },
+);
 
 const igdb = computed(() => currentRom.value?.igdb_metadata ?? null);
 // IGDB ships up to ~10 similar games per title; rendering all of them

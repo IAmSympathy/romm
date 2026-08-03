@@ -44,7 +44,7 @@ const missableCount = computed(
 );
 
 function isEarned(a: RAGameRomAchievement) {
-  return Boolean(a.badge_id && props.earnedAchievementIds.has(a.badge_id));
+  return Boolean(a.badge_id && props.earnedAchievementIds.has(String(a.badge_id)));
 }
 const earnedCount = computed(() => achievements.value.filter(isEarned).length);
 

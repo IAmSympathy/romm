@@ -28,6 +28,22 @@ export default defineStore("auth", {
     setCurrentUser(user: User | null) {
       this.user = user;
     },
+    async refreshRetroAchievements(incremental = true): Promise<User | null> {
+      if (!this.user?.id || !this.user?.ra_username) return this.user;
+      try {
+        const response = await userApi.refreshRetroAchievements({
+          id: this.user.id,
+          incremental,
+        });
+        if (response.data) {
+          this.user = response.data;
+        }
+        return this.user;
+      } catch (error) {
+        console.error("Error refreshing RetroAchievements progression: ", error);
+        return this.user;
+      }
+    },
     reset() {
       this.user = null;
       this.oauth_scopes = [];

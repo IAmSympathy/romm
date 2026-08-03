@@ -559,7 +559,7 @@ async def refresh_retro_achievements(
             embed=True,
         ),
     ] = False,
-) -> None:
+) -> UserSchema | None:
     """Refresh RetroAchievements progression data for a user."""
     user = db_user_handler.get_user(id)
     if not user or not user.ra_username:
@@ -574,13 +574,13 @@ async def refresh_retro_achievements(
             cast(RAUserProgression | None, user.ra_progression) if incremental else None
         ),
     )
-    db_user_handler.update_user(
+    updated_user = db_user_handler.update_user(
         id,
         {
             "ra_progression": user_progression,
         },
     )
-    return None
+    return UserSchema.from_orm_with_request(updated_user, request)
 
 
 @protected_route(
@@ -701,12 +701,24 @@ async def award_retro_achievement(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="RetroAchievements account not linked",
         )
-    return await meta_ra_handler.award_achievement(
+    result = await meta_ra_handler.award_achievement(
         game_id=game_id,
         achievement_id=achievement_id,
         username=user.ra_username,
         token=user.ra_token,
     )
+
+    if result.get("status") in ("AWARD_ACCEPTED", "ALREADY_UNLOCKED") or result.get("success") is True:
+        try:
+            user_progression = await meta_ra_handler.get_user_progression(
+                user.ra_username,
+                current_progression=cast(RAUserProgression | None, user.ra_progression),
+            )
+            db_user_handler.update_user(id, {"ra_progression": user_progression})
+        except Exception as exc:
+            log.error("Failed to update user progression after award: %s", exc)
+
+    return result
 
 
 @router.get("/ra/badge/{badge_name}")

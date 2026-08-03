@@ -103,7 +103,7 @@ async function refreshRetroAchievements({
   incremental?: boolean;
 }) {
   const payload: RefreshRetroAchievementsInput = { incremental };
-  return api.post<void>(`/users/${id}/ra/refresh`, payload);
+  return api.post<UserSchema>(`/users/${id}/ra/refresh`, payload);
 }
 
 async function testRetroAchievements({
