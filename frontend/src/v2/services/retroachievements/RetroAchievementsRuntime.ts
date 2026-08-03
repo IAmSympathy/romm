@@ -60,11 +60,8 @@ export class RetroAchievementsRuntime {
    * Format badge image URL to use backend proxy resolving browser CORS/CORP restrictions.
    */
   public formatBadgeUrl(rawBadgeUrl?: string): string {
-    const fallback = "/assets/romm/resources/metadata_providers/ra.png";
-    if (!rawBadgeUrl) {
-      console.log(`[RA Badge Proxy] Original: "${rawBadgeUrl}" | Converted: "${fallback}" | img.src: "${fallback}"`);
-      return fallback;
-    }
+    const fallback = "/assets/scrappers/ra.png";
+    if (!rawBadgeUrl) return fallback;
 
     let badgeFilename = "";
     const match = rawBadgeUrl.match(/Badge\/([^/]+)$/i);
@@ -77,9 +74,7 @@ export class RetroAchievementsRuntime {
       badgeFilename = rawBadgeUrl.replace(/^\//, "");
     }
 
-    const converted = `/api/users/ra/badge/${badgeFilename}`;
-    console.log(`[RA Badge Proxy] Original: "${rawBadgeUrl}" | Converted: "${converted}" | img.src: "${converted}"`);
-    return converted;
+    return `/api/users/ra/badge/${badgeFilename}`;
   }
 
   /**
