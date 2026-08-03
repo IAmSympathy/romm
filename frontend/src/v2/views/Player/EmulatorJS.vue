@@ -485,14 +485,14 @@ watch(gameRunning, (running, prev) => {
   if (running && !prev) {
     if (rom.value) {
       playSession.start(rom.value);
-      raManager.initForRom(rom.value);
+      raManager.initializeSession(auth.user, rom.value);
     }
     emitActivityStart();
     startActivityHeartbeat();
   }
   if (prev && !running) {
     playSession.flush();
-    raManager.stop();
+    raManager.reset();
     stopActivityHeartbeat();
     emitActivityStop();
     nextTick(focusPlayButton);
@@ -512,7 +512,7 @@ onBeforeUnmount(() => {
   // the user never exited the game to the config screen first. flush() is
   // idempotent, so an exit that already flushed via the watch is a no-op.
   playSession.flush();
-  raManager.stop();
+  raManager.reset();
   stopActivityHeartbeat();
   emitActivityStop();
   // Hand the keyboard and gamepad back to the UI; the flag otherwise
