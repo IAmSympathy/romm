@@ -17,6 +17,7 @@ export class RetroAchievementsMemory {
   private deltaCache: Map<string, number> = new Map();
   private priorCache: Map<string, number> = new Map();
   private lastFrameValues: Map<string, number> = new Map();
+  private loggedReadAddresses: Set<number> = new Set();
 
   /**
    * Return human-readable memory domain.
@@ -182,6 +183,9 @@ export class RetroAchievementsMemory {
       }
     }
 
+    if (!this.loggedReadAddresses) {
+      this.loggedReadAddresses = new Set();
+    }
     if (!this.loggedReadAddresses.has(address)) {
       this.loggedReadAddresses.add(address);
       const provName = this.providerManager.activeProvider?.name || this.resolutionMethod || "Direct WASM Heap";
