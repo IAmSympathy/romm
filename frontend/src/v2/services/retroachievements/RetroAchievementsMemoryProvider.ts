@@ -366,9 +366,53 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
 
     if (this.isResolvedState) {
       this.dumpGameBoyHRAMDiagnostic();
+      this.logGameBoyAddressDiagnosticTable();
     }
 
     return this.isResolvedState;
+  }
+
+  public logGameBoyAddressDiagnosticTable() {
+    if (!this.isResolvedState || this.ramOffset <= 0) return;
+
+    const emu = (window as any).EJS_emulator;
+    const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
+    const heap: Uint8Array | null = mod?.HEAPU8 || null;
+    if (!heap) return;
+
+    const testAddresses = [0xc000, 0xc201, 0xda02, 0xff80, 0xff99, 0xff9f, 0xffb3];
+
+    console.group("%c[RA Game Boy Address Mapping Comparison Diagnostic]", "color: #f43f5e; font-weight: bold; font-size: 14px;");
+    console.log(`%cWRAM Pointer (ramOffset): 0x${this.ramOffset.toString(16).toUpperCase()} | Heap Length: ${heap.length} bytes`, "font-weight: bold;");
+
+    const tableData: any[] = [];
+
+    for (const addr of testAddresses) {
+      const addrHex = `0x${addr.toString(16).toUpperCase().padStart(4, "0")}`;
+
+      const off1 = addr >= 0xc000 ? addr - 0xc000 : addr;
+      const off2 = addr & 0x1fff;
+      const off3 = 0x2000 + (addr >= 0xff80 ? addr - 0xff80 : 0);
+      const off4 = 0x3f80 + (addr >= 0xff80 ? addr - 0xff80 : 0);
+
+      const readSafe = (off: number) => {
+        const ptr = this.ramOffset + off;
+        return ptr >= 0 && ptr < heap.length ? heap[ptr] : "OOB";
+      };
+
+      tableData.push({
+        "CPU Address": addrHex,
+        "Current Offset": `0x${off1.toString(16).toUpperCase()} (${off1})`,
+        "Current Value": readSafe(off1),
+        "Alt 1: (addr - 0xC000)": `off: 0x${off1.toString(16).toUpperCase()} => val: ${readSafe(off1)}`,
+        "Alt 2: (addr & 0x1FFF)": `off: 0x${off2.toString(16).toUpperCase()} => val: ${readSafe(off2)}`,
+        "Alt 3: 0x2000 + (addr - 0xFF80)": `off: 0x${off3.toString(16).toUpperCase()} => val: ${readSafe(off3)}`,
+        "Alt 4: 0x3F80 + (addr - 0xFF80)": `off: 0x${off4.toString(16).toUpperCase()} => val: ${readSafe(off4)}`,
+      });
+    }
+
+    console.table(tableData);
+    console.groupEnd();
   }
 
   public dumpGameBoyHRAMDiagnostic() {
