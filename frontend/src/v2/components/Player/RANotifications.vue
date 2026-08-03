@@ -35,35 +35,56 @@ function onDismiss(id: string) {
             @error="(e: Event) => ((e.target as HTMLImageElement).src = '/assets/romm/resources/metadata_providers/ra.png')"
           />
           <v-icon
-            v-else-if="item.type === 'achievement_unlocked'"
-            color="#EAB308"
-            size="28"
-          >
-            mdi-trophy-award
-          </v-icon>
-          <v-icon
-            v-else-if="item.type === 'game_detected'"
+            v-else-if="item.type === 'auth_success'"
             color="#22C55E"
             size="28"
           >
-            mdi-check-decagram
-          </v-icon>
-          <v-icon
-            v-else-if="item.type === 'rom_unknown'"
-            color="#F59E0B"
-            size="28"
-          >
-            mdi-alert-circle-outline
+            {{ item.icon || "mdi-account-check-outline" }}
           </v-icon>
           <v-icon
             v-else-if="item.type === 'auth_failed'"
             color="#EF4444"
             size="28"
           >
-            mdi-close-circle-outline
+            {{ item.icon || "mdi-account-alert-outline" }}
+          </v-icon>
+          <v-icon
+            v-else-if="item.type === 'game_detected'"
+            color="#22C55E"
+            size="28"
+          >
+            {{ item.icon || "mdi-check-decagram" }}
+          </v-icon>
+          <v-icon
+            v-else-if="item.type === 'rom_unknown'"
+            color="#F59E0B"
+            size="28"
+          >
+            {{ item.icon || "mdi-help-circle-outline" }}
+          </v-icon>
+          <v-icon
+            v-else-if="item.type === 'set_unsupported'"
+            color="#EF4444"
+            size="28"
+          >
+            {{ item.icon || "mdi-close-circle-outline" }}
+          </v-icon>
+          <v-icon
+            v-else-if="item.type === 'set_completed'"
+            color="#FACC15"
+            size="32"
+          >
+            {{ item.icon || "mdi-trophy-crown" }}
+          </v-icon>
+          <v-icon
+            v-else-if="item.type === 'achievement_unlocked'"
+            color="#EAB308"
+            size="28"
+          >
+            {{ item.icon || "mdi-trophy-award" }}
           </v-icon>
           <v-icon v-else color="#3B82F6" size="28">
-            mdi-trophy
+            {{ item.icon || "mdi-trophy" }}
           </v-icon>
         </div>
 
@@ -75,6 +96,12 @@ function onDismiss(id: string) {
               class="r-ra-notif-card__points"
             >
               +{{ item.points }} pts
+            </span>
+            <span
+              v-else-if="item.type === 'game_detected'"
+              class="r-ra-notif-card__tag r-ra-notif-card__tag--active"
+            >
+              Set actif
             </span>
           </div>
           <p v-if="item.subtitle" class="r-ra-notif-card__subtitle">
@@ -104,7 +131,7 @@ function onDismiss(id: string) {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-width: 380px;
+  max-width: 400px;
   width: calc(100% - 32px);
   pointer-events: none;
 }
@@ -114,8 +141,8 @@ function onDismiss(id: string) {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
-  background: rgba(18, 18, 24, 0.88);
+  padding: 14px 16px;
+  background: rgba(18, 18, 24, 0.90);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -127,21 +154,74 @@ function onDismiss(id: string) {
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.r-ra-notif-card--achievement_unlocked {
-  border-color: rgba(234, 179, 8, 0.4);
+.r-ra-notif-card--auth_success {
+  border-color: rgba(34, 197, 94, 0.4);
   background: linear-gradient(
     135deg,
-    rgba(34, 25, 12, 0.92) 0%,
+    rgba(16, 42, 26, 0.92) 0%,
+    rgba(18, 18, 24, 0.92) 100%
+  );
+}
+
+.r-ra-notif-card--auth_failed {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: linear-gradient(
+    135deg,
+    rgba(42, 16, 16, 0.92) 0%,
     rgba(18, 18, 24, 0.92) 100%
   );
 }
 
 .r-ra-notif-card--game_detected {
-  border-color: rgba(34, 197, 94, 0.3);
+  border-color: rgba(34, 197, 94, 0.35);
+  background: linear-gradient(
+    135deg,
+    rgba(14, 38, 28, 0.90) 0%,
+    rgba(18, 18, 24, 0.90) 100%
+  );
 }
 
 .r-ra-notif-card--rom_unknown {
-  border-color: rgba(245, 158, 11, 0.3);
+  border-color: rgba(245, 158, 11, 0.4);
+  background: linear-gradient(
+    135deg,
+    rgba(38, 28, 14, 0.92) 0%,
+    rgba(18, 18, 24, 0.92) 100%
+  );
+}
+
+.r-ra-notif-card--set_unsupported {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: linear-gradient(
+    135deg,
+    rgba(42, 16, 16, 0.92) 0%,
+    rgba(18, 18, 24, 0.92) 100%
+  );
+}
+
+.r-ra-notif-card--achievement_unlocked {
+  border-color: rgba(234, 179, 8, 0.5);
+  background: linear-gradient(
+    135deg,
+    rgba(42, 32, 12, 0.94) 0%,
+    rgba(18, 18, 24, 0.92) 100%
+  );
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    0 0 16px rgba(234, 179, 8, 0.2);
+}
+
+.r-ra-notif-card--set_completed {
+  border: 2px solid rgba(250, 204, 21, 0.85);
+  background: linear-gradient(
+    135deg,
+    rgba(74, 52, 10, 0.96) 0%,
+    rgba(35, 25, 8, 0.95) 50%,
+    rgba(18, 18, 24, 0.95) 100%
+  );
+  box-shadow:
+    0 0 24px rgba(234, 179, 8, 0.45),
+    0 8px 32px rgba(0, 0, 0, 0.6);
 }
 
 .r-ra-notif-card__icon-wrapper {
@@ -149,15 +229,16 @@ function onDismiss(id: string) {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
 }
 
 .r-ra-notif-card__badge {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   object-fit: contain;
-  border-radius: 4px;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .r-ra-notif-card__content {
@@ -173,8 +254,9 @@ function onDismiss(id: string) {
 }
 
 .r-ra-notif-card__title {
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.25;
   letter-spacing: 0.01em;
   color: #ffffff;
   white-space: nowrap;
@@ -182,23 +264,50 @@ function onDismiss(id: string) {
   text-overflow: ellipsis;
 }
 
+.r-ra-notif-card--set_completed .r-ra-notif-card__title {
+  font-size: 16px;
+  color: #fef08a;
+  text-shadow: 0 0 8px rgba(250, 204, 21, 0.5);
+}
+
 .r-ra-notif-card__points {
   font-size: 11px;
   font-weight: 800;
-  padding: 2px 6px;
+  padding: 2px 8px;
   border-radius: 9999px;
-  background: rgba(234, 179, 8, 0.2);
+  background: rgba(234, 179, 8, 0.25);
   color: #fef08a;
-  border: 1px solid rgba(234, 179, 8, 0.3);
+  border: 1px solid rgba(234, 179, 8, 0.4);
   flex-shrink: 0;
 }
 
+.r-ra-notif-card__tag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+
+.r-ra-notif-card__tag--active {
+  background: rgba(34, 197, 94, 0.2);
+  color: #86efac;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+}
+
 .r-ra-notif-card__subtitle {
-  margin: 2px 0 0 0;
+  margin: 4px 0 0 0;
   font-size: 12px;
   line-height: 1.35;
-  color: rgba(255, 255, 255, 0.8);
+  color: rgba(255, 255, 255, 0.85);
   word-break: break-word;
+}
+
+.r-ra-notif-card--set_completed .r-ra-notif-card__subtitle {
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 500;
 }
 
 .r-ra-notif-card__close {

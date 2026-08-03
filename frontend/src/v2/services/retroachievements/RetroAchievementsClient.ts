@@ -81,9 +81,13 @@ export class RetroAchievementsClient {
         }
       }
 
+      const gameIcon = patch.Icon || patch.GameIcon || patch.ImageIcon || "";
+      const iconUrl = gameIcon ? `/api/users/ra/badge/${gameIcon.replace(/^\//, "")}.png` : undefined;
+
       return {
         gameId: Number(patch.ID || gameId),
         title: patch.Title || "Unknown Game",
+        iconUrl,
         achievements,
       };
     } catch (err) {

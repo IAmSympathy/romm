@@ -38,6 +38,7 @@ export interface SessionUserInput {
 
 export class RetroAchievementsManager {
   private client: RetroAchievementsClient;
+  private completionTriggered = false;
   public notifications = ref<RANotificationItem[]>([]);
   public activePatch = ref<RAPatchData | null>(null);
   public gameId = ref<number | null>(null);
@@ -71,7 +72,7 @@ export class RetroAchievementsManager {
       points: options.points,
       badgeUrl: options.badgeUrl,
       icon: options.icon,
-      duration: options.duration ?? (type === "achievement_unlocked" ? 6000 : 4500),
+      duration: options.duration ?? (type === "achievement_unlocked" || type === "set_completed" ? 6500 : 4500),
     };
 
     this.notifications.value.unshift(notification);
@@ -119,13 +120,27 @@ export class RetroAchievementsManager {
     console.log("%cCalculated RA hash:", "font-weight: bold;", calculatedHash ?? "None");
     console.groupEnd();
 
-    if (!user?.id) {
-      console.warn("[RA Debug] User ID missing.");
+    // 1. Connection status notification at game boot
+    if (!user?.id || !username || !token) {
+      console.warn("[RA Debug] User credentials missing.");
+      this.addNotification(
+        "auth_failed",
+        "Connexion RetroAchievements échouée",
+        "Veuillez vérifier vos identifiants RetroAchievements dans votre profil.",
+        { icon: "mdi-account-alert-outline" },
+      );
       return false;
     }
 
     const creds: RACredentials = { username, token };
     this.credentials.value = creds;
+
+    this.addNotification(
+      "auth_success",
+      "Connecté à RetroAchievements",
+      `Connecté en tant que : ${username}`,
+      { icon: "mdi-account-check-outline" },
+    );
 
     // Resolve Game ID
     let resolvedGameId: number | null = rom.ra_id ?? null;
@@ -136,13 +151,14 @@ export class RetroAchievementsManager {
       console.log("[RA Debug] GameID resolved by hash:", resolvedGameId);
     }
 
+    // 2. Unknown ROM handling (Yellow + ?)
     if (!resolvedGameId || resolvedGameId <= 0) {
       console.warn("[RA Debug] RA response: Game not found (resolvedGameId is 0 or null)");
       this.addNotification(
         "rom_unknown",
         "RetroAchievements",
-        "Cette ROM n'est pas reconnue.",
-        { icon: "mdi-alert-circle-outline" },
+        "Jeu non reconnu par RetroAchievements",
+        { icon: "mdi-help-circle-outline" },
       );
       this.isInitialized.value = true;
       return false;
@@ -156,13 +172,14 @@ export class RetroAchievementsManager {
       this.client.getUnlocks(user.id, resolvedGameId),
     ]);
 
-    if (!patch) {
-      console.warn("[RA Debug] RA response: Failed to fetch patch data or CORS/HTTP error");
+    // 3. Known game with no active set or unsupported (Red + X)
+    if (!patch || !patch.achievements || patch.achievements.length === 0) {
+      console.warn("[RA Debug] RA response: Unsupported game or no active achievement set");
       this.addNotification(
-        "rom_unknown",
+        "set_unsupported",
         "RetroAchievements",
-        "Cette ROM n'est pas reconnue.",
-        { icon: "mdi-alert-circle-outline" },
+        "Ce jeu n'a pas de set RetroAchievements actif",
+        { icon: "mdi-close-circle-outline" },
       );
       this.isInitialized.value = true;
       return false;
@@ -182,6 +199,10 @@ export class RetroAchievementsManager {
 
     const totalCount = patch.achievements.length;
     const gameTitle = patch.title || rom.name || rom.fs_name || "Game";
+    const percent = totalCount > 0 ? Math.round((unlockedCount / totalCount) * 100) : 0;
+
+    // Track 100% completion so starting an already finished set won't duplicate completion toast
+    this.completionTriggered = totalCount > 0 && unlockedCount === totalCount;
 
     // Initialize and start real-time RetroAchievementsRuntime
     raRuntime.initialize(user.id, resolvedGameId, patch.achievements);
@@ -190,12 +211,15 @@ export class RetroAchievementsManager {
     };
     raRuntime.start();
 
-    // Show game recognized notification
+    // 4. Active achievement set notification
     this.addNotification(
       "game_detected",
-      "RetroAchievements",
-      `${gameTitle} (${unlockedCount}/${totalCount} succès débloqués)`,
-      { icon: "mdi-trophy-outline" },
+      gameTitle,
+      `${unlockedCount} / ${totalCount} achievements débloqués (${percent}%)`,
+      {
+        badgeUrl: patch.iconUrl || patch.achievements[0]?.badgeUrl,
+        icon: "mdi-check-decagram",
+      },
     );
 
     return true;
@@ -214,16 +238,34 @@ export class RetroAchievementsManager {
       ach.unlocked = true;
     }
 
+    // Show clean achievement unlock notification (Title bold, Description below, points in badge)
     this.addNotification(
       "achievement_unlocked",
-      "Achievement Unlocked!",
-      `${ach.title} (${ach.points} Points) - ${ach.description}`,
+      ach.title,
+      ach.description,
       {
         points: ach.points,
         badgeUrl: ach.badgeUrl,
         icon: "mdi-trophy-award",
       },
     );
+
+    // 5. Special 100% completion notification (fires once per set)
+    const totalCount = this.activePatch.value.achievements.length;
+    const unlockedCount = this.activePatch.value.achievements.filter((a) => a.unlocked).length;
+
+    if (totalCount > 0 && unlockedCount === totalCount && !this.completionTriggered) {
+      this.completionTriggered = true;
+      this.addNotification(
+        "set_completed",
+        "Set terminé à 100% !",
+        "Félicitations, tous les achievements sont débloqués !",
+        {
+          icon: "mdi-trophy-crown",
+          duration: 10000,
+        },
+      );
+    }
   }
 
   public reset() {
@@ -233,6 +275,7 @@ export class RetroAchievementsManager {
     this.gameId.value = null;
     this.credentials.value = null;
     this.isInitialized.value = false;
+    this.completionTriggered = false;
   }
 }
 

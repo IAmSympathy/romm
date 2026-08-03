@@ -18,6 +18,7 @@ export interface RAAchievement {
 export interface RAPatchData {
   gameId: number;
   title: string;
+  iconUrl?: string;
   achievements: RAAchievement[];
 }
 
@@ -26,7 +27,9 @@ export type RANotificationType =
   | "auth_failed"
   | "game_detected"
   | "rom_unknown"
-  | "achievement_unlocked";
+  | "set_unsupported"
+  | "achievement_unlocked"
+  | "set_completed";
 
 export interface RANotificationItem {
   id: string;
