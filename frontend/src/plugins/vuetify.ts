@@ -24,10 +24,6 @@ const instance = createVuetify({
   },
   icons: {
     defaultSet: "mdi",
-    aliases,
-    sets: {
-      mdi,
-    },
   },
   theme: {
     defaultTheme: getInitialTheme(),
