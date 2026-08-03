@@ -150,28 +150,6 @@ export function resolveDescriptorAddress(
   return null;
 }
 
-/**
- * Strategy 1: EmulatorJSMemoryProvider
- * Tests standard Libretro memory key constants on EmulatorJSGetMemoryData(key).
- */
-export class EmulatorJSMemoryProvider implements IMemoryProvider {
-  public name = "EmulatorJS Custom Memory API Provider";
-  public ramOffset: number = 0;
-  public ramSize: number = 0;
-  public isResolvedState: boolean = false;
-  public activeFnName: string = "";
-  public parsedMemoryMap: RetroMemoryMap | null = null;
-
-  public isAvailable(): boolean {
-    const emu = (window as any).EJS_emulator;
-    const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
-    const asm = mod?.asm || mod?.wasmExports || {};
-    return typeof mod?.EmulatorJSGetMemoryData === "function" ||
-      typeof asm?.EmulatorJSGetMemoryData === "function" ||
-      typeof mod?._get_memory_data === "function" ||
-      typeof asm?._get_memory_data === "function";
-  }
-
 export function scanWasmHeapForMemoryMap(heap: Uint8Array): RetroMemoryMap | null {
   try {
     const view = new DataView(heap.buffer, heap.byteOffset, heap.byteLength);
@@ -202,6 +180,28 @@ export function scanWasmHeapForMemoryMap(heap: Uint8Array): RetroMemoryMap | nul
   } catch {}
   return null;
 }
+
+/**
+ * Strategy 1: EmulatorJSMemoryProvider
+ * Tests standard Libretro memory key constants on EmulatorJSGetMemoryData(key).
+ */
+export class EmulatorJSMemoryProvider implements IMemoryProvider {
+  public name = "EmulatorJS Custom Memory API Provider";
+  public ramOffset: number = 0;
+  public ramSize: number = 0;
+  public isResolvedState: boolean = false;
+  public activeFnName: string = "";
+  public parsedMemoryMap: RetroMemoryMap | null = null;
+
+  public isAvailable(): boolean {
+    const emu = (window as any).EJS_emulator;
+    const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
+    const asm = mod?.asm || mod?.wasmExports || {};
+    return typeof mod?.EmulatorJSGetMemoryData === "function" ||
+      typeof asm?.EmulatorJSGetMemoryData === "function" ||
+      typeof mod?._get_memory_data === "function" ||
+      typeof asm?._get_memory_data === "function";
+  }
 
   public probeLibretroMemoryMap(): RetroMemoryMap | null {
     const emu = (window as any).EJS_emulator;
