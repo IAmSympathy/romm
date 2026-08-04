@@ -47,80 +47,71 @@ export class MemoryRegionResolver {
   }
 }
 
+export interface HRAMCandidate {
+  wasmPointer: number;
+  label: string;
+  asciiRatio: number;
+  uniqueBytes: number;
+  zeroRatio: number;
+  ffRatio: number;
+  changedBytesCount: number;
+  confidenceScore: number;
+  accepted: boolean;
+  reason: string;
+  sampleHex: string;
+}
+
 export class GambatteHRAMResolver {
   public name = "Gambatte Core HRAM Resolver";
 
   public resolveHRAM(ramOffset: number, ramSize: number, heap: Uint8Array, mod: any): MemoryRegion | null {
     if (ramOffset <= 0 || !heap) return null;
 
-    console.group("%c[RA Gambatte HRAM Resolver Diagnostic]", "color: #ec4899; font-weight: bold; font-size: 14px;");
+    console.group("%c[RA Gambatte HRAM Resolver Structural Inspection]", "color: #ec4899; font-weight: bold; font-size: 14px;");
 
-    let foundPtr = 0;
-    let foundSource = "";
-
-    // 1. Inspect WASM module exports & symbols
     const asm = mod?.asm || mod?.wasmExports || {};
-    const searchKeys = ["_hram", "hram", "_hram_", "_io_ram", "_gambatte_hram", "hram_"];
-    for (const key of searchKeys) {
+    const symbolKeys = ["_hram", "hram", "_hram_", "_io_ram", "_gambatte_hram", "hram_"];
+    let foundPtr = 0;
+    let foundSymbol = "";
+
+    for (const key of symbolKeys) {
       const sym = mod?.[key] || asm?.[key];
       if (typeof sym === "number" && sym > 0 && sym < heap.length) {
         foundPtr = sym;
-        foundSource = `WASM Symbol (${key})`;
+        foundSymbol = key;
         break;
       }
     }
 
-    // 2. Scan contiguous C++ struct allocations relative to WRAM (ramOffset)
-    if (foundPtr === 0) {
-      const candidateOffsets = [
-        { offset: ramOffset + 8192, label: "WRAM + 8192 (0x2000 offset)" },
-        { offset: ramOffset + 32768, label: "WRAM + 32768 (0x8000 offset)" },
-        { offset: ramOffset + 0x3f80, label: "WRAM + 0x3F80 offset" },
-        { offset: ramOffset - 128, label: "WRAM - 128 offset" }
-      ];
-
-      for (const cand of candidateOffsets) {
-        if (cand.offset > 0 && cand.offset + 127 < heap.length) {
-          let nonFF = 0;
-          let nonZero = 0;
-          for (let i = 0; i < 127; i++) {
-            const b = heap[cand.offset + i];
-            if (b !== 0xff) nonFF++;
-            if (b !== 0x00) nonZero++;
-          }
-          if (nonFF > 0 && nonZero > 0) {
-            foundPtr = cand.offset;
-            foundSource = cand.label;
-            break;
-          }
-        }
-      }
-    }
-
     if (foundPtr > 0) {
-      const sampleBytes: string[] = [];
-      for (let b = 0; b < 16 && foundPtr + b < heap.length; b++) {
-        sampleBytes.push(heap[foundPtr + b].toString(16).toUpperCase().padStart(2, "0"));
+      const sampleHexArr: string[] = [];
+      for (let i = 0; i < 16 && foundPtr + i < heap.length; i++) {
+        sampleHexArr.push(heap[foundPtr + i].toString(16).toUpperCase().padStart(2, "0"));
       }
 
-      console.log("%cStatus:", "font-weight: bold; color: #10b981;", "FOUND");
-      console.log("%cWASM Pointer:", "font-weight: bold;", `0x${foundPtr.toString(16).toUpperCase()} (${foundPtr})`);
-      console.log("%cSource / Method:", "font-weight: bold;", foundSource);
-      console.log("%cSize:", "font-weight: bold;", "127 bytes");
-      console.log("%cSample Bytes (first 16):", "font-weight: bold;", sampleBytes.join(" "));
+      console.log(
+        `%c[RA Gambatte HRAM Resolver] Status: EXPLICIT WASM SYMBOL FOUND ("${foundSymbol}" at 0x${foundPtr.toString(16).toUpperCase()})`,
+        "color: #10b981; font-weight: bold;"
+      );
+      console.log("%cSample Hex:", "font-weight: bold;", sampleHexArr.join(" "));
       console.groupEnd();
 
       return {
-        source: `Gambatte HRAM (${foundSource})`,
+        source: `Gambatte HRAM (WASM Symbol: ${foundSymbol})`,
         cpuStart: 0xff80,
         cpuEnd: 0xfffe,
         wasmPointer: foundPtr,
-        size: 127
+        size: 127,
       };
     }
 
-    console.log("%cStatus:", "font-weight: bold; color: #ef4444;", "NOT FOUND");
-    console.log("No valid HRAM memory structure found near WRAM pointer 0x" + ramOffset.toString(16).toUpperCase());
+    console.log(
+      "%c[RA Gambatte HRAM Resolver] Status: NOT EXPOSED BY WASM BUILD\n" +
+      "Gambatte core retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM) returns only 8192B WRAM.\n" +
+      "HRAM (0xFF80-0xFFFE) is an internal C++ member unexported in this WASM binary build.\n" +
+      "CPU addresses 0xFF80-0xFFFE are safely handled as UNMAPPED (returning 0) without blind heap scanning.",
+      "color: #f59e0b; font-weight: bold;"
+    );
     console.groupEnd();
 
     return null;
