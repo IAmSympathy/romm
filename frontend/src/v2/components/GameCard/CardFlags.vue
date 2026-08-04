@@ -50,7 +50,7 @@ const languages = computed(() =>
 <style scoped>
 .card-flags {
   position: absolute;
-  top: 7px;
+  bottom: 7px;
   left: 7px;
   z-index: 2;
   display: flex;
@@ -69,7 +69,7 @@ const languages = computed(() =>
   background: var(--r-color-overlay-scrim-soft);
   border: 1px solid var(--r-color-overlay-border);
   border-radius: var(--r-radius-pill);
-  font-size: 15px;
+  font-size: 17px;
   line-height: 1.2;
   backdrop-filter: blur(6px);
 }
