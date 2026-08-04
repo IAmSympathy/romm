@@ -609,16 +609,16 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
                   });
                 } else if (core.includes("snes") || core.includes("bsnes")) {
                   this.resolver.registerRegion({
-                    source: "SNES WRAM (0x7E0000-0x7FFFFF)",
+                    source: "SNES Main WRAM (0x7E0000-0x7FFFFF)",
                     cpuStart: 0x7e0000,
                     cpuEnd: 0x7fffff,
                     wasmPointer: ptr,
                     size: Math.min(sz, 131072)
                   });
                   this.resolver.registerRegion({
-                    source: "SNES Low WRAM (0x0000-0x1FFF)",
-                    cpuStart: 0x0000,
-                    cpuEnd: 0x1fff,
+                    source: "SNES Low WRAM Mirror (0x000000-0x001FFF)",
+                    cpuStart: 0x000000,
+                    cpuEnd: 0x001fff,
                     wasmPointer: ptr,
                     size: Math.min(sz, 8192)
                   });
@@ -635,6 +635,19 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
                     source: `System RAM (${this.activeFnName})`,
                     cpuStart: 0x0000,
                     cpuEnd: sz - 1,
+                    wasmPointer: ptr,
+                    size: sz
+                  });
+                }
+              }
+
+              if (ptr > 0 && strKey === "RETRO_MEMORY_SAVE_RAM") {
+                const core = ((window as any).EJS_core || "").toLowerCase();
+                if (core.includes("snes") || core.includes("bsnes")) {
+                  this.resolver.registerRegion({
+                    source: "SNES Cartridge SRAM (0x700000-0x7DFFFF)",
+                    cpuStart: 0x700000,
+                    cpuEnd: 0x700000 + sz - 1,
                     wasmPointer: ptr,
                     size: sz
                   });
