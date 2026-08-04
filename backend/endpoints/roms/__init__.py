@@ -959,11 +959,9 @@ def get_random_rom(
     ] = None,
 ) -> SimpleRomSchema:
     """Retrieve a single random rom matching the given filters."""
-    import time
-    start = time.time()
+
     perms = get_permissions(request)
-    print("get_permissions:", time.time() - start)
-    start = time.time()
+
     base_query = select(Rom.id)
 
     filtered_query = db_rom_handler.filter_roms(
@@ -985,14 +983,10 @@ def get_random_rom(
         genres=genres,
         include_related=False,
     )
-    print("filter_roms:", time.time() - start)
-    start = time.time()
+
     rand_func = func.random() if ROMM_DB_DRIVER == "postgresql" else func.rand()
     with sync_session.begin() as session:
-        print(filtered_query.order_by(rand_func).limit(1))
         chosen_id = session.scalar(filtered_query.order_by(rand_func).limit(1))
-        print("SQL random:", time.time() - start)
-        start = time.time()
         if not chosen_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

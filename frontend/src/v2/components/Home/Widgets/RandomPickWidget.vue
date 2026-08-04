@@ -84,9 +84,7 @@ const totalRoms = ref<number | null>(globalLibraryTotal);
 
 // One attempt at a pick using the dedicated random ROM endpoint.
 async function pickOnce(): Promise<SimpleRom | null> {
-  console.time("random-api");
   const { data: rom } = await romApi.getRandomRom();
-  console.timeEnd("random-api");
   if (rom) {
     const coverUrl = (rom as any).cover_url || (rom as any)?.metadatum?.cover_url;
     if (coverUrl) {
@@ -101,7 +99,6 @@ async function pickOnce(): Promise<SimpleRom | null> {
 const isInitialLoading = ref(true);
 
 async function reroll({ notify }: { notify: boolean }) {
-  console.time("TOTAL REROLL");
   rollDiceFace();
   const hadFocus = document.activeElement === rerollEl();
   
@@ -112,10 +109,8 @@ async function reroll({ notify }: { notify: boolean }) {
 
   try {
     const rom = await pickOnce();
-    console.time("API");
     if (!rom) throw new Error("random pick came back empty");
     pick.value = rom;
-    console.timeEnd("TOTAL REROLL");
     failed.value = false;
 
     isBouncing.value = false;
