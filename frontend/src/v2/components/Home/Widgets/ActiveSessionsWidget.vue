@@ -24,12 +24,13 @@ const sessionsCount = computed(() => activeSessions.value.length);
     </template>
 
     <div v-if="sessionsCount > 0" class="r-v2-widget-active__list">
-      <router-link
-        v-for="session in activeSessions"
-        :key="`${session.user_id}-${session.rom_id}-${session.started_at}`"
-        class="r-v2-widget-active__card"
-        :to="session.rom_id && session.rom_id > 0 ? { name: ROUTES.ROM, params: { rom: session.rom_id } } : {}"
-      >
+    <router-link
+      v-for="session in activeSessions"
+      :key="`${session.user_id}-${session.rom_id}-${session.started_at}`"
+      class="r-v2-widget-active__card"
+      :class="{ 'is-playing': session.rom_id && session.rom_id > 0 }"
+      :to="session.rom_id && session.rom_id > 0 ? { name: ROUTES.ROM, params: { rom: session.rom_id } } : {}"
+    >
         <!-- Far-left 44px Avatar with Purple Ring -->
         <div class="r-v2-widget-active__avatar-cover">
           <img
@@ -46,7 +47,7 @@ const sessionsCount = computed(() => activeSessions.value.length);
           <!-- Username + Green Online Dot -->
           <div class="r-v2-widget-active__user">
             <span>{{ session.username || 'Joueur' }}</span>
-            <span class="r-v2-widget-active__online-dot" />
+            <span v-if="session.rom_id && session.rom_id > 0" class="r-v2-widget-active__online-dot" />
           </div>
 
           <!-- Active Game Row OR Online Browsing Status -->
@@ -124,7 +125,7 @@ const sessionsCount = computed(() => activeSessions.value.length);
   box-sizing: border-box;
 }
 
-.r-v2-widget-active__card:hover {
+.r-v2-widget-active__card.is-playing:hover {
   background: rgba(167, 139, 250, 0.12);
   border-color: rgba(167, 139, 250, 0.35);
 }
