@@ -102,7 +102,7 @@ const playableLabel = computed(() => playableTooltip(emulator.value));
       {{ displayName }}
     </div>
     <div v-if="romCount != null" class="plat-tile__count">
-      {{ romCount }} {{ romCount === 1 ? "game" : "games" }}
+      {{ romCount }} {{ romCount === 1 ? "jeu" : "jeux" }}
     </div>
   </router-link>
 </template>

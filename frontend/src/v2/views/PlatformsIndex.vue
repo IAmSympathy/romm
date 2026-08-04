@@ -206,38 +206,38 @@ const platformGroupByItems: GroupByItem[] = [
   {
     id: "none",
     icon: "mdi-view-agenda-outline",
-    ariaLabel: "Flat view",
-    title: "Flat view",
+    ariaLabel: "Vue plate",
+    title: "Vue plate",
   },
   {
     id: "letter",
     icon: "mdi-alphabetical-variant",
-    ariaLabel: "Group by letter",
-    title: "Group by letter",
+    ariaLabel: "Grouper par lettre",
+    title: "Grouper par lettre",
   },
   {
     id: "family",
     icon: "mdi-family-tree",
-    ariaLabel: "Group by family",
-    title: "Group by family",
+    ariaLabel: "Grouper par famille",
+    title: "Grouper par famille",
   },
   {
     id: "category",
     icon: "mdi-shape-outline",
-    ariaLabel: "Group by category",
-    title: "Group by category",
+    ariaLabel: "Grouper par catégorie",
+    title: "Grouper par catégorie",
   },
   {
     id: "generation",
     icon: "mdi-numeric",
-    ariaLabel: "Group by generation",
-    title: "Group by generation",
+    ariaLabel: "Grouper par génération",
+    title: "Grouper par génération",
   },
   {
     id: "playable",
     icon: "mdi-play-circle-outline",
-    ariaLabel: "Group by playable",
-    title: "Group by playable",
+    ariaLabel: "Grouper par jouable",
+    title: "Grouper par jouable",
   },
 ];
 
@@ -370,7 +370,7 @@ const familyGroups = computed<Bucket[]>(() =>
       const slug = p.family_slug;
       const name = p.family_name;
       if (slug && name) return { key: slug, label: name };
-      return { key: "__other", label: "Other" };
+      return { key: "__other", label: "Autre" };
     },
     (a, b) => {
       if (a.key === "__other") return 1;
@@ -390,7 +390,7 @@ const categoryGroups = computed<Bucket[]>(() =>
     (p) => {
       const c = p.category;
       if (c) return { key: c, label: prettifyPlatformCategory(c) };
-      return { key: "__other", label: "Other" };
+      return { key: "__other", label: "Autre" };
     },
     (a, b) => {
       if (a.key === "__other") return 1;
@@ -415,7 +415,7 @@ const generationGroups = computed<Bucket[]>(() =>
           label: platformGenerationLabel(g),
         };
       }
-      return { key: "__unknown", label: "Unknown generation" };
+      return { key: "__unknown", label: "Génération inconnue" };
     },
     (a, b) => {
       if (a.key === "__unknown") return 1;
@@ -433,8 +433,8 @@ const playableGroups = computed<Bucket[]>(() =>
     sortedForGrid.value,
     (p) =>
       playableById.value.get(p.id)
-        ? { key: "playable", label: "Playable" }
-        : { key: "not_playable", label: "Not playable" },
+        ? { key: "playable", label: "Jouable" }
+        : { key: "not_playable", label: "Non jouable" },
     (a, b) => (a.key === "playable" ? -1 : b.key === "playable" ? 1 : 0),
   ),
 );
