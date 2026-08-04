@@ -612,21 +612,6 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
                   if (hramReg) {
                     this.resolver.registerRegion(hramReg);
                   }
-                } else if (core.includes("nes") || core.includes("fceumm") || core.includes("nestopia") || core.includes("mesen")) {
-                  this.resolver.registerRegion({
-                    source: "NES Internal RAM (0x0000-0x07FF)",
-                    cpuStart: 0x0000,
-                    cpuEnd: 0x07ff,
-                    wasmPointer: ptr,
-                    size: Math.min(sz, 2048)
-                  });
-                  this.resolver.registerRegion({
-                    source: "NES RAM Mirror (0x0800-0x1FFF)",
-                    cpuStart: 0x0800,
-                    cpuEnd: 0x1fff,
-                    wasmPointer: ptr,
-                    size: Math.min(sz, 2048)
-                  });
                 } else if (core.includes("snes") || core.includes("bsnes")) {
                   this.resolver.registerRegion({
                     source: "SNES Main WRAM (0x7E0000-0x7FFFFF)",
@@ -641,6 +626,21 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
                     cpuEnd: 0x001fff,
                     wasmPointer: ptr,
                     size: Math.min(sz, 8192)
+                  });
+                } else if ((core.includes("nes") && !core.includes("snes")) || core.includes("fceumm") || core.includes("nestopia") || core.includes("mesen")) {
+                  this.resolver.registerRegion({
+                    source: "NES Internal RAM (0x0000-0x07FF)",
+                    cpuStart: 0x0000,
+                    cpuEnd: 0x07ff,
+                    wasmPointer: ptr,
+                    size: Math.min(sz, 2048)
+                  });
+                  this.resolver.registerRegion({
+                    source: "NES RAM Mirror (0x0800-0x1FFF)",
+                    cpuStart: 0x0800,
+                    cpuEnd: 0x1fff,
+                    wasmPointer: ptr,
+                    size: Math.min(sz, 2048)
                   });
                 } else if (core.includes("sega") || core.includes("genesis") || core.includes("megadrive") || core.includes("picodrive")) {
                   this.resolver.registerRegion({

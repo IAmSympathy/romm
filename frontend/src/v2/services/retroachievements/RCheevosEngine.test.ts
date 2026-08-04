@@ -84,4 +84,13 @@ describe("RCheevosEngine Faithful rcheevos Parser", () => {
     expect(trigger.alternative![0].conditions[0].operand1.value.num).toBe(0x0020);
     expect(trigger.alternative![1].conditions[0].operand1.value.num).toBe(0x0030);
   });
+
+  it("snes9x must not match nes core branch", () => {
+    const snesCore = "snes9x";
+    const isSnes = snesCore.includes("snes") || snesCore.includes("bsnes");
+    const isNes = (snesCore.includes("nes") && !snesCore.includes("snes")) || snesCore.includes("fceumm") || snesCore.includes("nestopia") || snesCore.includes("mesen");
+
+    expect(isSnes).toBe(true);
+    expect(isNes).toBe(false);
+  });
 });
