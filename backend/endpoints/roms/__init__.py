@@ -30,7 +30,7 @@ from fastapi_pagination import resolve_params
 from fastapi_pagination.limit_offset import LimitOffsetPage, LimitOffsetParams
 from fastapi_pagination.types import GreaterEqualZero
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from starlette.responses import FileResponse
 
@@ -38,6 +38,7 @@ from config import (
     DEV_MODE,
     DISABLE_DOWNLOAD_ENDPOINT_AUTH,
     LIBRARY_BASE_PATH,
+    ROMM_DB_DRIVER,
 )
 from decorators.auth import protected_route
 from endpoints.responses import BulkOperationResponse
@@ -982,16 +983,17 @@ def get_random_rom(
         include_related=False,
     )
 
+    rand_func = func.random() if ROMM_DB_DRIVER == "postgresql" else func.rand()
+
     with sync_session.begin() as session:
-        matching_ids = list(session.scalars(filtered_query).all())
-        if not matching_ids:
+        chosen_id = session.scalar(filtered_query.order_by(rand_func).limit(1))
+        if not chosen_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="No ROMs match the criteria",
             )
 
-        chosen_id = random.choice(matching_ids)
-        rom = db_rom_handler.get_rom(chosen_id, session=session)
+        rom = db_rom_handler.get_rom_simple(chosen_id, session=session)
         if not rom:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
