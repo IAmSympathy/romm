@@ -50,7 +50,7 @@ const languages = computed(() =>
 <style scoped>
 .card-flags {
   position: absolute;
-  bottom: 7px;
+  top: 7px;
   left: 7px;
   z-index: 2;
   display: flex;
