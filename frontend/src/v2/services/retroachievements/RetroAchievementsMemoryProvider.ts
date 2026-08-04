@@ -514,6 +514,26 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     const mod = emu?.gameManager?.Module || emu?.Module || (window as any).Module;
     if (!mod || !mod.HEAPU8) return false;
 
+    const currentCore = ((window as any).EJS_core || "").toLowerCase();
+    const currentPlatform = (window as any).EJS_platform || (window as any).EJS_gameName || "unknown";
+    const existingRegions = this.resolver.getRegisteredRegions();
+
+    console.group("%c[RA Core Mapping Diagnostic]", "color: #3b82f6; font-weight: bold; font-size: 14px;");
+    console.log(`Detected Platform: "${currentPlatform}"`);
+    console.log(`Detected Core (window.EJS_core): "${currentCore}"`);
+    console.log(`Provider isResolvedState Flag: ${this.isResolvedState}`);
+    console.log(`Active Regions in Resolver (${existingRegions.length}):`, existingRegions.map((r) => r.source));
+
+    if (this.isResolvedState) {
+      console.log(
+        `%cREASON PREVIOUS MAPPING RETAINED:\n` +
+        `provider.isResolvedState is TRUE from a previous session or initial probe.\n` +
+        `Condition (!this.isResolvedState) evaluated to FALSE, so this.resolver.clear() and core-specific registration (including SNES) were SKIPPED.`,
+        "color: #ef4444; font-weight: bold;"
+      );
+    }
+    console.groupEnd();
+
     const asm = mod.asm || mod.wasmExports || {};
     const validKeys: { key: string; result: any; pointer: number; size: number; previewHex: string }[] = [];
 
