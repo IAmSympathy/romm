@@ -22,36 +22,36 @@ export interface PlatformColumn {
 }
 
 export const PLATFORM_COLUMNS: readonly PlatformColumn[] = [
-  { key: "name", label: "Name", sortable: true, align: "start" },
+  { key: "name", label: "Nom", sortable: true, align: "start" },
   {
     key: "family",
-    label: "Family",
+    label: "Famille",
     sortable: true,
     align: "start",
     meta: true,
   },
   {
     key: "category",
-    label: "Category",
+    label: "Catégorie",
     sortable: true,
     align: "start",
     meta: true,
   },
   {
     key: "generation",
-    label: "Generation",
+    label: "Génération",
     sortable: true,
     align: "start",
     meta: true,
   },
   {
     key: "playable",
-    label: "Playable",
+    label: "Jouable",
     sortable: true,
     align: "center",
     meta: true,
   },
-  { key: "rom_count", label: "Games", sortable: true, align: "end" },
+  { key: "rom_count", label: "Jeux", sortable: true, align: "end" },
 ];
 
 export const PLATFORM_LIST_GRID_TEMPLATE =
@@ -81,10 +81,7 @@ export function platformGenerationLabel(n: number): string {
   if (n === 99) return "Cloud";
   const mod10 = n % 10;
   const mod100 = n % 100;
-  let suffix: string;
-  if (mod10 === 1 && mod100 !== 11) suffix = "st";
-  else if (mod10 === 2 && mod100 !== 12) suffix = "nd";
-  else if (mod10 === 3 && mod100 !== 13) suffix = "rd";
-  else suffix = "th";
-  return `${n}${suffix} generation`;
+  if (mod10 === 1 && mod100 !== 11) return `${n}ère génération`;
+  if (mod10 === 2 && mod100 !== 12) return `${n}ème génération`;
+  return `${n}ème génération`;
 }
