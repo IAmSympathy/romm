@@ -766,6 +766,8 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     console.groupEnd();
   }
 
+  private loggedResolverReads: Set<number> = new Set();
+
   public readByte(address: number, bit?: number | null, realAddress?: number): number {
     if (!this.isResolvedState) return 0;
     const emu = (window as any).EJS_emulator;
@@ -775,11 +777,13 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
 
     const targetAddr = realAddress !== undefined ? realAddress : address;
     let ptr = -1;
+    let matchedRegion = "UNMAPPED";
 
     if (this.parsedMemoryMap && targetAddr !== undefined) {
       const resolvedDesc = resolveDescriptorAddress(this.parsedMemoryMap, targetAddr);
       if (resolvedDesc) {
         ptr = resolvedDesc.wasmPointer;
+        matchedRegion = `retro_memory_map (${resolvedDesc.desc.addrspace || "Descriptor"})`;
       }
     }
 
@@ -787,6 +791,7 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
       const res = this.resolver.resolveWasmPointer(targetAddr);
       if (!res.isUnmapped && res.wasmPointer >= 0) {
         ptr = res.wasmPointer;
+        matchedRegion = res.region ? res.region.source : "Matched Region";
       }
     }
 
@@ -809,6 +814,15 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
     let val = heap[ptr];
     if (bit !== undefined && bit !== null && bit >= 0 && bit <= 7) {
       val = (val >> bit) & 1;
+    }
+
+    if (!this.loggedResolverReads.has(targetAddr)) {
+      this.loggedResolverReads.add(targetAddr);
+      const addrHex = `0x${targetAddr.toString(16).toUpperCase().padStart(4, "0")}`;
+      console.log(
+        `%c[RA Resolver Read] CPU address ${addrHex} | Matched region: "${matchedRegion}" | WASM Pointer: 0x${ptr.toString(16).toUpperCase()} | Value: ${val}`,
+        "color: #10b981; font-weight: bold;"
+      );
     }
 
     if (targetAddr >= 0xff80 && targetAddr <= 0xfffe) {
@@ -841,11 +855,13 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
 
     const targetAddr = realAddress !== undefined ? realAddress : address;
     let ptr = -1;
+    let matchedRegion = "UNMAPPED";
 
     if (this.parsedMemoryMap && targetAddr !== undefined) {
       const resolvedDesc = resolveDescriptorAddress(this.parsedMemoryMap, targetAddr);
       if (resolvedDesc) {
         ptr = resolvedDesc.wasmPointer;
+        matchedRegion = `retro_memory_map (${resolvedDesc.desc.addrspace || "Descriptor"})`;
       }
     }
 
@@ -853,11 +869,23 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
       const res = this.resolver.resolveWasmPointer(targetAddr);
       if (!res.isUnmapped && res.wasmPointer >= 0) {
         ptr = res.wasmPointer;
+        matchedRegion = res.region ? res.region.source : "Matched Region";
       }
     }
 
     if (ptr < 0 || ptr + 1 >= heap.length) return 0;
-    return endian === "little" ? heap[ptr] | (heap[ptr + 1] << 8) : (heap[ptr] << 8) | heap[ptr + 1];
+    const val = endian === "little" ? heap[ptr] | (heap[ptr + 1] << 8) : (heap[ptr] << 8) | heap[ptr + 1];
+
+    if (!this.loggedResolverReads.has(targetAddr)) {
+      this.loggedResolverReads.add(targetAddr);
+      const addrHex = `0x${targetAddr.toString(16).toUpperCase().padStart(4, "0")}`;
+      console.log(
+        `%c[RA Resolver Read] CPU address ${addrHex} (Word) | Matched region: "${matchedRegion}" | WASM Pointer: 0x${ptr.toString(16).toUpperCase()} | Value: ${val}`,
+        "color: #10b981; font-weight: bold;"
+      );
+    }
+
+    return val;
   }
 
   public readDword(address: number, isDelta?: boolean, endian: "little" | "big" = "little", realAddress?: number): number {
@@ -869,11 +897,13 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
 
     const targetAddr = realAddress !== undefined ? realAddress : address;
     let ptr = -1;
+    let matchedRegion = "UNMAPPED";
 
     if (this.parsedMemoryMap && targetAddr !== undefined) {
       const resolvedDesc = resolveDescriptorAddress(this.parsedMemoryMap, targetAddr);
       if (resolvedDesc) {
         ptr = resolvedDesc.wasmPointer;
+        matchedRegion = `retro_memory_map (${resolvedDesc.desc.addrspace || "Descriptor"})`;
       }
     }
 
@@ -881,13 +911,25 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
       const res = this.resolver.resolveWasmPointer(targetAddr);
       if (!res.isUnmapped && res.wasmPointer >= 0) {
         ptr = res.wasmPointer;
+        matchedRegion = res.region ? res.region.source : "Matched Region";
       }
     }
 
     if (ptr < 0 || ptr + 3 >= heap.length) return 0;
-    return endian === "little"
+    const val = endian === "little"
       ? (heap[ptr] | (heap[ptr + 1] << 8) | (heap[ptr + 2] << 16) | (heap[ptr + 3] << 24)) >>> 0
       : ((heap[ptr] << 24) | (heap[ptr + 1] << 16) | (heap[ptr + 2] << 8) | heap[ptr + 3]) >>> 0;
+
+    if (!this.loggedResolverReads.has(targetAddr)) {
+      this.loggedResolverReads.add(targetAddr);
+      const addrHex = `0x${targetAddr.toString(16).toUpperCase().padStart(4, "0")}`;
+      console.log(
+        `%c[RA Resolver Read] CPU address ${addrHex} (Dword) | Matched region: "${matchedRegion}" | WASM Pointer: 0x${ptr.toString(16).toUpperCase()} | Value: ${val}`,
+        "color: #10b981; font-weight: bold;"
+      );
+    }
+
+    return val;
   }
 }
 

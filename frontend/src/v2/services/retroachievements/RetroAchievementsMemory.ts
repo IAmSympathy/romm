@@ -158,8 +158,7 @@ export class RetroAchievementsMemory {
     isPrior: boolean = false,
     endian: "little" | "big" = "little"
   ): number {
-    const mappedAddress = this.mapAddress(address);
-    const cacheKey = `${size}:${mappedAddress}:${bit ?? "all"}`;
+    const cacheKey = `${size}:${address}:${bit ?? "all"}`;
 
     if (isPrior) {
       if (this.priorCache.has(cacheKey)) return this.priorCache.get(cacheKey)!;
@@ -173,9 +172,9 @@ export class RetroAchievementsMemory {
     let val = 0;
     if (this.providerManager.activeProvider) {
       const activeP = this.providerManager.activeProvider as any;
-      if (size === 1) val = activeP.readByte(mappedAddress, bit, address);
-      else if (size === 2) val = activeP.readWord(mappedAddress, false, endian, address);
-      else if (size === 4) val = activeP.readDword(mappedAddress, false, endian, address);
+      if (size === 1) val = activeP.readByte(address, bit);
+      else if (size === 2) val = activeP.readWord(address, false, endian);
+      else if (size === 4) val = activeP.readDword(address, false, endian);
     } else if (this.isResolved) {
       const { wasmPointer } = this.resolveAddress(address);
       const discovery = this.discoverMemory();
@@ -203,14 +202,20 @@ export class RetroAchievementsMemory {
     }
     if (!this.loggedReadAddresses.has(address)) {
       this.loggedReadAddresses.add(address);
-      const provName = this.providerManager.activeProvider?.name || this.resolutionMethod || "Direct WASM Heap";
-      const heapPtr = this.ramOffset + mappedAddress;
+      const activeProv = this.providerManager.activeProvider as any;
+      const provName = activeProv?.name || this.resolutionMethod || "Direct WASM Heap";
+      const resolver = activeProv?.resolver;
+      const res = resolver ? resolver.resolveWasmPointer(address) : null;
+      const matchedRegion = res?.region ? res.region.source : "UNMAPPED";
+      const regionSize = res?.region ? `${res.region.size} bytes` : "0 bytes";
+      const heapPtr = res && !res.isUnmapped ? res.wasmPointer : -1;
+
       console.group(`%c[RA Memory Read Diagnostic] Address 0x${address.toString(16).toUpperCase()}`, "color: #06b6d4; font-weight: bold;");
       console.log("%cAdresse demandée (rcheevos):", "font-weight: bold;", `0x${address.toString(16).toUpperCase()} (${address})`);
-      console.log("%cMapped Offset:", "font-weight: bold;", `0x${mappedAddress.toString(16).toUpperCase()} (${mappedAddress})`);
+      console.log("%cMatched Region (Resolver):", "font-weight: bold;", matchedRegion);
       console.log("%cProvider mémoire utilisé:", "font-weight: bold;", provName);
-      console.log("%cTaille disponible:", "font-weight: bold;", `${this.ramSize} bytes`);
-      console.log("%cOffset réellement lu (Heap PTR):", "font-weight: bold;", `0x${heapPtr.toString(16).toUpperCase()} (${heapPtr})`);
+      console.log("%cTaille disponible:", "font-weight: bold;", regionSize);
+      console.log("%cOffset réellement lu (Heap PTR):", "font-weight: bold;", heapPtr >= 0 ? `0x${heapPtr.toString(16).toUpperCase()} (${heapPtr})` : "UNMAPPED (0)");
       console.log("%cValeur lue:", "font-weight: bold;", val);
       console.groupEnd();
     }
