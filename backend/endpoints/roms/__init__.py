@@ -989,6 +989,7 @@ def get_random_rom(
     start = time.time()
     rand_func = func.random() if ROMM_DB_DRIVER == "postgresql" else func.rand()
     with sync_session.begin() as session:
+        print(filtered_query.order_by(rand_func).limit(1), flush=True)
         chosen_id = session.scalar(filtered_query.order_by(rand_func).limit(1))
         print("SQL random:", time.time() - start)
         start = time.time()
