@@ -2,11 +2,15 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import activityApi, { type ActivityEntry } from "@/services/api/activity";
 import userApi from "@/services/api/user";
 import router from "@/plugins/router";
+import socket from "@/services/socket";
 
 const activeSessions = ref<ActivityEntry[]>([]);
 const knownSessionKeys = new Set<string>();
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let listenerCount = 0;
+let socketBound = false;
+let isFetching = false;
+let initialLoadDone = false;
 
 let currentUserId: number | null = null;
 let currentUsername: string | null = null;
@@ -121,7 +125,67 @@ function showGameLaunchToast(session: ActivityEntry) {
   }, 7000);
 }
 
-let initialLoadDone = false;
+function bindSocketEvents() {
+  if (socketBound) return;
+  try {
+    if (!socket.connected) socket.connect();
+    socket.on("activity:update", (entry: ActivityEntry) => {
+      const idx = activeSessions.value.findIndex(
+        (s) => s.user_id === entry.user_id && (s.device_id === entry.device_id || (!s.device_id && !entry.device_id))
+      );
+      if (idx >= 0) {
+        activeSessions.value[idx] = entry;
+      } else {
+        activeSessions.value.push(entry);
+      }
+      if (entry.rom_id && entry.rom_id > 0) {
+        const key = `${entry.user_id}-${entry.rom_id}-${entry.started_at}`;
+        if (!knownSessionKeys.has(key)) {
+          knownSessionKeys.add(key);
+          if (initialLoadDone) {
+            showGameLaunchToast(entry);
+          }
+        }
+      }
+    });
+    socket.on("activity:clear", (data: { user_id: number; device_id: string }) => {
+      activeSessions.value = activeSessions.value.filter(
+        (s) => !(s.user_id === data.user_id && s.device_id === data.device_id)
+      );
+    });
+    socketBound = true;
+  } catch {
+    // Ignore socket connection errors
+  }
+}
+
+async function fetchSessions() {
+  if (isFetching) return;
+  isFetching = true;
+  try {
+    await initCurrentUser();
+    const { data } = await activityApi.getAllActivity();
+    const newSessions = data || [];
+
+    for (const s of newSessions) {
+      if (s.rom_id && s.rom_id > 0) {
+        const key = `${s.user_id}-${s.rom_id}-${s.started_at}`;
+        if (!knownSessionKeys.has(key)) {
+          knownSessionKeys.add(key);
+          if (initialLoadDone) {
+            showGameLaunchToast(s);
+          }
+        }
+      }
+    }
+    initialLoadDone = true;
+    activeSessions.value = newSessions;
+  } catch {
+    // Ignore poll errors
+  } finally {
+    isFetching = false;
+  }
+}
 
 export function useActiveSessions() {
   const activeRomIds = computed<Set<number>>(() => {
@@ -132,39 +196,19 @@ export function useActiveSessions() {
     );
   });
 
-  async function fetchSessions() {
-    await initCurrentUser();
-    try {
-      const { data } = await activityApi.getAllActivity();
-      const newSessions = data || [];
-
-      for (const s of newSessions) {
-        if (s.rom_id && s.rom_id > 0) {
-          const key = `${s.user_id}-${s.rom_id}-${s.started_at}`;
-          if (!knownSessionKeys.has(key)) {
-            knownSessionKeys.add(key);
-            if (initialLoadDone) {
-              showGameLaunchToast(s);
-            }
-          }
-        }
-      }
-      initialLoadDone = true;
-      activeSessions.value = newSessions;
-    } catch {
-      // Ignore poll errors
-    }
-  }
-
   function isPlaying(romId: number): boolean {
     return activeRomIds.value.has(Number(romId));
   }
 
   onMounted(() => {
     listenerCount++;
-    void fetchSessions();
-    if (!pollTimer) {
-      pollTimer = setInterval(fetchSessions, 3000);
+    bindSocketEvents();
+
+    if (listenerCount === 1) {
+      void fetchSessions();
+      if (!pollTimer) {
+        pollTimer = setInterval(fetchSessions, 15000);
+      }
     }
   });
 
