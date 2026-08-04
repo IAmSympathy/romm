@@ -14,7 +14,7 @@ let currentUsername: string | null = null;
 async function initCurrentUser() {
   if (currentUserId !== null) return;
   try {
-    const { data } = await userApi.getMe();
+    const { data } = await userApi.fetchCurrentUser();
     if (data) {
       if (data.id) currentUserId = data.id;
       if (data.username) currentUsername = data.username.toLowerCase();

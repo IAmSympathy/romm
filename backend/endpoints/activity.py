@@ -44,6 +44,10 @@ class DeviceHeartbeatPayload(BaseModel):
 @protected_route(router.get, "", [Scope.ROMS_USER_READ])
 async def get_all_activity(request: Request) -> list[ActivityEntrySchema]:
     """Return every currently active play session across all users."""
+    if request.user and request.user.is_authenticated:
+        await activity_handler.set_online(
+            request.user.id, request.user.username, request.user.avatar_path or ""
+        )
     entries = await activity_handler.get_all_active()
     return _visible_activity(request, entries)
 

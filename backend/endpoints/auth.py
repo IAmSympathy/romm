@@ -85,6 +85,9 @@ async def logout(request: Request) -> Optional[OIDCLogoutResponse]:
         so the client can redirect the browser to log out of the OIDC provider.
     """
 
+    if hasattr(request, "user") and request.user and getattr(request.user, "is_authenticated", False):
+        await activity_handler.clear_online(request.user.id)
+
     id_token = request.session.get("oidc_id_token")
     request.session.clear()
 

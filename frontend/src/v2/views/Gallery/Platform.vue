@@ -325,33 +325,17 @@ function onScan() {
   scanOpen.value = true;
 }
 
-// Random ROM — pick one game from this platform and jump to its
-// details. Mirrors the Home RandomPickWidget approach: a cheap
-// count-only fetch gives the `total`, then a single-item fetch at a
-// random offset resolves the ROM. Scoped to the current platform via
-// `platformIds`.
+// Random ROM — pick one game from this platform and jump to its details using
+// the dedicated random ROM endpoint.
 async function onRandomGame() {
   const p = currentPlatform.value;
   if (!p || randomLoading.value) return;
   randomLoading.value = true;
   try {
-    const { data: head } = await romApi.getRoms({
-      platformIds: [p.id],
-      limit: 1,
-      offset: 0,
+    const { data: pick } = await romApi.getRandomRom({
+      platform_ids: [p.id],
     });
-    if (!head.total) {
-      snackbar.info(t("platform.random-rom-empty"));
-      return;
-    }
-    const randomOffset = Math.floor(Math.random() * head.total);
-    const { data } = await romApi.getRoms({
-      platformIds: [p.id],
-      limit: 1,
-      offset: randomOffset,
-    });
-    const pick = data.items[0];
-    if (!pick) {
+    if (!pick || !pick.id) {
       snackbar.info(t("platform.random-rom-empty"));
       return;
     }

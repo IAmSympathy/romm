@@ -82,41 +82,18 @@ function rollDiceFace() {
 let globalLibraryTotal: number | null = null;
 const totalRoms = ref<number | null>(globalLibraryTotal);
 
-// One attempt at a pick. `null` means the library holds no roms;
-// `undefined` means the offset came back empty, which the backend's
-// cached id index makes possible when it drifts from the database
-// between the two calls (a scan, a deletion).
-async function pickOnce(): Promise<SimpleRom | null | undefined> {
-  if (totalRoms.value === null) {
-    if (globalLibraryTotal !== null) {
-      totalRoms.value = globalLibraryTotal;
-    } else {
-      const { data: head } = await romApi.getRoms({
-        ...PICK_QUERY,
-        offset: 0,
-        withTotal: true,
-      });
-      if (!head.total) return null;
-      totalRoms.value = head.total;
-      globalLibraryTotal = head.total;
-    }
-  }
-
-  const { data: result } = await romApi.getRoms({
-    ...PICK_QUERY,
-    withTotal: false,
-    offset: Math.floor(Math.random() * totalRoms.value),
-  });
-  const rom = result.items.at(0);
+// One attempt at a pick using the dedicated random ROM endpoint.
+async function pickOnce(): Promise<SimpleRom | null> {
+  const { data: rom } = await romApi.getRandomRom();
   if (rom) {
-    const coverUrl = rom.cover_url || (rom as any)?.metadatum?.cover_url;
+    const coverUrl = (rom as any).cover_url || (rom as any)?.metadatum?.cover_url;
     if (coverUrl) {
       // Non-blocking image preload (fire and forget) so rerolls remain instant
       const img = new Image();
       img.src = coverUrl;
     }
   }
-  return rom;
+  return rom || null;
 }
 
 const isInitialLoading = ref(true);
@@ -131,13 +108,8 @@ async function reroll({ notify }: { notify: boolean }) {
   }, 400);
 
   try {
-    let rom = await pickOnce();
-    if (rom === undefined) {
-      totalRoms.value = null;
-      globalLibraryTotal = null;
-      rom = await pickOnce();
-    }
-    if (rom === undefined) throw new Error("random pick came back empty");
+    const rom = await pickOnce();
+    if (!rom) throw new Error("random pick came back empty");
     pick.value = rom;
     failed.value = false;
 

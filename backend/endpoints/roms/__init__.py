@@ -1,5 +1,6 @@
 import binascii
 import json
+import random
 from base64 import b64encode
 from datetime import datetime, timezone
 from io import BytesIO
@@ -29,6 +30,7 @@ from fastapi_pagination import resolve_params
 from fastapi_pagination.limit_offset import LimitOffsetPage, LimitOffsetParams
 from fastapi_pagination.types import GreaterEqualZero
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from starlette.responses import FileResponse
 
@@ -896,6 +898,121 @@ def get_rom_identifiers(
     )
 
     return [r.id for r in db_roms]
+
+
+@protected_route(router.get, "/random", [Scope.ROMS_READ])
+def get_random_rom(
+    request: Request,
+    search_term: Annotated[
+        str | None,
+        Query(description="Search term to filter roms."),
+    ] = None,
+    platform_ids: Annotated[
+        list[int] | None,
+        Query(
+            description=(
+                "Platform internal ids. Multiple values are allowed by repeating the"
+                " parameter, and results that match any of the values will be returned."
+            ),
+        ),
+    ] = None,
+    collection_id: Annotated[
+        int | None,
+        Query(description="Collection internal id.", ge=1),
+    ] = None,
+    virtual_collection_id: Annotated[
+        str | None,
+        Query(description="Virtual collection internal id."),
+    ] = None,
+    smart_collection_id: Annotated[
+        int | None,
+        Query(description="Smart collection internal id.", ge=1),
+    ] = None,
+    matched: Annotated[
+        bool | None,
+        Query(description="Whether the rom matched at least one metadata source."),
+    ] = None,
+    favorite: Annotated[
+        bool | None,
+        Query(description="Whether the rom is marked as favorite."),
+    ] = None,
+    duplicate: Annotated[
+        bool | None,
+        Query(description="Whether the rom is marked as duplicate."),
+    ] = None,
+    playable: Annotated[
+        bool | None,
+        Query(description="Whether the rom is playable from the browser."),
+    ] = None,
+    missing: Annotated[
+        bool | None,
+        Query(description="Whether the rom is missing from the filesystem."),
+    ] = None,
+    has_ra: Annotated[
+        bool | None,
+        Query(description="Whether the rom has RetroAchievements data."),
+    ] = None,
+    genres: Annotated[
+        list[str] | None,
+        Query(description="Associated genre."),
+    ] = None,
+) -> SimpleRomSchema:
+    """Retrieve a single random rom matching the given filters."""
+    perms = get_permissions(request)
+
+    base_query = select(Rom.id)
+
+    filtered_query = db_rom_handler.filter_roms(
+        query=base_query,
+        user_id=request.user.id,
+        hidden_platform_ids=list(perms.hidden_platform_ids),
+        hidden_rom_ids=list(perms.hidden_rom_ids),
+        platform_ids=platform_ids,
+        collection_id=collection_id,
+        virtual_collection_id=virtual_collection_id,
+        smart_collection_id=smart_collection_id,
+        search_term=search_term,
+        matched=matched,
+        favorite=favorite,
+        duplicate=duplicate,
+        playable=playable,
+        has_ra=has_ra,
+        missing=missing,
+        genres=genres,
+        include_related=False,
+    )
+
+    with sync_session.begin() as session:
+        matching_ids = list(session.scalars(filtered_query).all())
+        if not matching_ids:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No ROMs match the criteria",
+            )
+
+        chosen_id = random.choice(matching_ids)
+        rom = db_rom_handler.get_rom(chosen_id, session=session)
+        if not rom:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Selected ROM not found",
+            )
+
+        files_by_rom = db_rom_handler.get_files_for_roms([chosen_id], session=session)
+        siblings_by_rom = db_rom_handler.get_siblings_for_roms(
+            [chosen_id],
+            user_id=request.user.id,
+            session=session,
+            hidden_platform_ids=list(perms.hidden_platform_ids),
+            hidden_rom_ids=list(perms.hidden_rom_ids),
+        )
+
+        return SimpleRomSchema.from_orm_with_request(
+            db_rom=rom,
+            request=request,
+            files=files_by_rom.get(chosen_id, []),
+            siblings=siblings_by_rom.get(chosen_id, []),
+        )
 
 
 @protected_route(

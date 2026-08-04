@@ -917,11 +917,16 @@ async function getRomFilters() {
   return api.get<RomFiltersDict>("/roms/filters");
 }
 
+async function getRandomRom(params?: Record<string, any>) {
+  return api.get<SimpleRom>("/roms/random", { params });
+}
+
 export default {
   uploadRoms,
   getRoms,
   getRecentRoms,
   getRecentPlayedRoms,
+  getRandomRom,
   getRom,
   getRomSimple,
   getRomByMetadataProvider,

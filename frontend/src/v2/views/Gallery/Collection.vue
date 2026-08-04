@@ -270,16 +270,16 @@ function onDownload() {
 // to the correct `getRoms` filter param (the same split the download
 // flow uses).
 function randomScope(): {
-  collectionId?: number;
-  virtualCollectionId?: string;
-  smartCollectionId?: number;
+  collection_id?: number;
+  virtual_collection_id?: string;
+  smart_collection_id?: number;
 } {
   const c = currentCollection.value;
   if (!c) return {};
   if (currentKind.value === "virtual")
-    return { virtualCollectionId: String(c.id) };
-  if (currentKind.value === "smart") return { smartCollectionId: Number(c.id) };
-  return { collectionId: Number(c.id) };
+    return { virtual_collection_id: String(c.id) };
+  if (currentKind.value === "smart") return { smart_collection_id: Number(c.id) };
+  return { collection_id: Number(c.id) };
 }
 
 async function onRandomGame() {
@@ -290,25 +290,9 @@ async function onRandomGame() {
   const stale = () => currentCollection.value?.id !== scopeId;
   try {
     const scope = randomScope();
-    const { data: head } = await romApi.getRoms({
-      ...scope,
-      limit: 1,
-      offset: 0,
-    });
+    const { data: pick } = await romApi.getRandomRom(scope);
     if (stale()) return;
-    if (!head.total) {
-      snackbar.info(t("collection.empty"));
-      return;
-    }
-    const randomOffset = Math.floor(Math.random() * head.total);
-    const { data } = await romApi.getRoms({
-      ...scope,
-      limit: 1,
-      offset: randomOffset,
-    });
-    if (stale()) return;
-    const pick = data.items[0];
-    if (!pick) {
+    if (!pick || !pick.id) {
       snackbar.info(t("collection.empty"));
       return;
     }

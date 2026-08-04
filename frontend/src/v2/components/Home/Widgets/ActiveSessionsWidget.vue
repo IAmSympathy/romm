@@ -46,7 +46,7 @@ const sessionsCount = computed(() => activeSessions.value.length);
           <!-- Username + Green Online Dot -->
           <div class="r-v2-widget-active__user">
             <span>{{ session.username || 'Joueur' }}</span>
-            <span v-if="session.rom_id && session.rom_id > 0" class="r-v2-widget-active__online-dot" />
+            <span class="r-v2-widget-active__online-dot" />
           </div>
 
           <!-- Active Game Row OR Online Browsing Status -->
