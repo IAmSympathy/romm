@@ -516,7 +516,7 @@ export class EmulatorJSMemoryProvider implements IMemoryProvider {
 
     const currentCore = ((window as any).EJS_core || "").toLowerCase();
     const currentPlatform = (window as any).EJS_platform || (window as any).EJS_gameName || "unknown";
-    const existingRegions = this.resolver.getRegisteredRegions();
+    const existingRegions = this.resolver.regions || [];
 
     console.group("%c[RA Core Mapping Diagnostic]", "color: #3b82f6; font-weight: bold; font-size: 14px;");
     console.log(`Detected Platform: "${currentPlatform}"`);
