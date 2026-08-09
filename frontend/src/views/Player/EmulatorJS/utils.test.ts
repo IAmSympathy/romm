@@ -133,10 +133,9 @@ describe("installEJSDefaultOptionsTrap", () => {
     expect(emulator.preGetSetting).toBe(patched);
   });
 
-  it("registers LCD shaders in window.EJS_shaders", () => {
+  it("registers the LCD shader in window.EJS_shaders", () => {
     const shaders = (window as unknown as { EJS_shaders?: Record<string, string> }).EJS_shaders;
     expect(shaders).toBeDefined();
     expect(shaders?.LCD).toBeDefined();
-    expect(shaders?.lcd3x).toBeDefined();
   });
 });

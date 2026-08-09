@@ -524,10 +524,6 @@ export function installEJSShaders() {
   const w = window as any;
   w.EJS_shaders = {
     LCD: EJS_LCD_SHADER_GLSL,
-    "LCD 3x": EJS_LCD_SHADER_GLSL,
-    lcd: EJS_LCD_SHADER_GLSL,
-    lcd3x: EJS_LCD_SHADER_GLSL,
-    "lcd3x.glslp": EJS_LCD_SHADER_GLSL,
     ...(w.EJS_shaders || {}),
   };
 }
