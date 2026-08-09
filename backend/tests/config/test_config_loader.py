@@ -62,8 +62,28 @@ def test_config_loader():
         },
     ]
     assert loader.config.EJS_SETTINGS == {
+        "melonds": {"melonds_touch_mode": "touch"},
+        "desmume": {"desmume_pointer_type": "mouse"},
+        "desmume2015": {"desmume_pointer_type": "mouse"},
+        "fceumm": {
+            "fceumm_zapper_mode": "pointer",
+            "fceumm_show_crosshair": "enabled",
+        },
+        "nestopia": {
+            "nestopia_zapper_device": "pointer",
+            "nestopia_show_crosshair": "enabled",
+            "nestopia_zapper_crosshair": "enabled",
+        },
+        "snes9x": {
+            "snes9x_opt_device_p2": "pointer",
+            "snes9x_show_crosshair": "enabled",
+            "snes9x_region": "ntsc",
+        },
+        "bsnes": {
+            "bsnes_opt_device_p2": "pointer",
+            "bsnes_show_crosshair": "enabled",
+        },
         "parallel_n64": {"vsync": "disabled"},
-        "snes9x": {"snes9x_region": "ntsc"},
     }
     assert loader.config.EJS_CONTROLS == {
         "snes9x": {
@@ -123,7 +143,28 @@ def test_empty_config_loader():
     assert not loader.config.EJS_DISABLE_BATCH_BOOTUP
     assert not loader.config.EJS_NETPLAY_ENABLED
     assert loader.config.EJS_NETPLAY_ICE_SERVERS == []
-    assert loader.config.EJS_SETTINGS == {}
+    assert loader.config.EJS_SETTINGS == {
+        "melonds": {"melonds_touch_mode": "touch"},
+        "desmume": {"desmume_pointer_type": "mouse"},
+        "desmume2015": {"desmume_pointer_type": "mouse"},
+        "fceumm": {
+            "fceumm_zapper_mode": "pointer",
+            "fceumm_show_crosshair": "enabled",
+        },
+        "nestopia": {
+            "nestopia_zapper_device": "pointer",
+            "nestopia_show_crosshair": "enabled",
+            "nestopia_zapper_crosshair": "enabled",
+        },
+        "snes9x": {
+            "snes9x_opt_device_p2": "pointer",
+            "snes9x_show_crosshair": "enabled",
+        },
+        "bsnes": {
+            "bsnes_opt_device_p2": "pointer",
+            "bsnes_show_crosshair": "enabled",
+        },
+    }
     assert loader.config.EJS_CONTROLS == {}
     assert loader.config.SCAN_ARTWORK_PRIORITY_OVERRIDES == {}
     assert loader.config.SCAN_REGION_MODE == "prefer_rom_tags"

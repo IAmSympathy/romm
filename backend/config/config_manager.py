@@ -63,6 +63,28 @@ DEFAULT_EXCLUDED_DIRS: Final = [
     ".DocumentRevisions-V100",
     "System Volume Information",
 ]
+DEFAULT_EJS_SETTINGS: Final[dict[str, dict[str, str]]] = {
+    "melonds": {"melonds_touch_mode": "touch"},
+    "desmume": {"desmume_pointer_type": "mouse"},
+    "desmume2015": {"desmume_pointer_type": "mouse"},
+    "fceumm": {
+        "fceumm_zapper_mode": "pointer",
+        "fceumm_show_crosshair": "enabled",
+    },
+    "nestopia": {
+        "nestopia_zapper_device": "pointer",
+        "nestopia_show_crosshair": "enabled",
+        "nestopia_zapper_crosshair": "enabled",
+    },
+    "snes9x": {
+        "snes9x_opt_device_p2": "pointer",
+        "snes9x_show_crosshair": "enabled",
+    },
+    "bsnes": {
+        "bsnes_opt_device_p2": "pointer",
+        "bsnes_show_crosshair": "enabled",
+    },
+}
 
 
 class EjsControlsButton(TypedDict):
@@ -454,7 +476,7 @@ class ConfigManager:
             EJS_NETPLAY_ICE_SERVERS=pydash.get(
                 self._raw_config, "emulatorjs.netplay.ice_servers", []
             ),
-            EJS_SETTINGS=pydash.get(self._raw_config, "emulatorjs.settings", {}),
+            EJS_SETTINGS=self._get_ejs_settings(),
             EJS_CONTROLS=self._get_ejs_controls(),
             SCAN_METADATA_PRIORITY=pydash.get(
                 self._raw_config,
@@ -541,6 +563,18 @@ class ConfigManager:
                 self._raw_config, "streaming.containers", []
             ),
         )
+
+    def _get_ejs_settings(self) -> dict[str, dict[str, str]]:
+        """Get EJS settings merged with DEFAULT_EJS_SETTINGS"""
+        raw_settings = pydash.get(self._raw_config, "emulatorjs.settings", {})
+        merged = pydash.clone_deep(DEFAULT_EJS_SETTINGS)
+        if isinstance(raw_settings, dict):
+            for core, options in raw_settings.items():
+                if isinstance(options, dict):
+                    if core not in merged:
+                        merged[core] = {}
+                    merged[core].update(options)
+        return merged
 
     def _get_ejs_controls(self) -> dict[str, EjsControls]:
         """Get EJS controls with default player entries for each core"""

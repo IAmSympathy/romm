@@ -131,39 +131,6 @@ declare global {
   }
 }
 
-function getDefaultMouseCoreOptions(core: string): Record<string, string> {
-  switch (core) {
-    case "melonds":
-      return { melonds_touch_mode: "touch" };
-    case "desmume":
-    case "desmume2015":
-      return { desmume_pointer_type: "mouse" };
-    case "fceumm":
-      return {
-        fceumm_zapper_mode: "pointer",
-        fceumm_show_crosshair: "enabled",
-      };
-    case "nestopia":
-      return {
-        nestopia_zapper_device: "pointer",
-        nestopia_show_crosshair: "enabled",
-        nestopia_zapper_crosshair: "enabled",
-      };
-    case "snes9x":
-      return {
-        snes9x_opt_device_p2: "pointer",
-        snes9x_show_crosshair: "enabled",
-      };
-    case "bsnes":
-      return {
-        bsnes_opt_device_p2: "pointer",
-        bsnes_show_crosshair: "enabled",
-      };
-    default:
-      return {};
-  }
-}
-
 const supportedCores = getSupportedEJSCores(
   romRef.value.platform_slug,
   configStore.config.EJS_NETPLAY_ENABLED,
@@ -195,12 +162,10 @@ window.EJS_Buttons = {
   exitEmulation: false,
 };
 const coreOptions = configStore.getEJSCoreOptions(window.EJS_core);
-const mouseCoreOptions = getDefaultMouseCoreOptions(window.EJS_core);
 window.EJS_defaultOptions = {
   // Force saving saves and states to the browser
   "save-state-location": "browser",
   rewindEnabled: "enabled",
-  ...mouseCoreOptions,
   ...coreOptions,
 };
 const ejsControls = configStore.getEJSControls(props.core);
