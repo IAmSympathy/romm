@@ -150,8 +150,8 @@ export async function saveState({
           }),
           screenshotFile: shotBuffer
             ? new File([shotBuffer], `${filename}.png`, {
-                type: "image/png",
-              })
+              type: "image/png",
+            })
             : undefined,
         },
       ],
@@ -192,8 +192,8 @@ export async function saveSave({
         screenshotFile:
           screenshotFile && save.screenshot
             ? new File([screenshotFile], save.screenshot.file_name, {
-                type: "application/octet-stream",
-              })
+              type: "application/octet-stream",
+            })
             : undefined,
         deviceId,
       });
@@ -222,8 +222,8 @@ export async function saveSave({
           }),
           screenshotFile: screenshotFile
             ? new File([screenshotFile], `${filename}.png`, {
-                type: "application/octet-stream",
-              })
+              type: "application/octet-stream",
+            })
             : undefined,
         },
       ],
@@ -391,7 +391,7 @@ function installAudioTap() {
     try {
       localStorage.setItem("romm_saved_volume", vol.toString());
       localStorage.setItem("volume", vol.toString());
-    } catch {}
+    } catch { }
 
     if (w.__ejsNetplayAudioTap && w.__ejsNetplayAudioTap.last) {
       const ctx = w.__ejsNetplayAudioTap.last;
@@ -473,7 +473,7 @@ function patchNetplayAudio(netplay: any) {
         (this.emu && this.emu.gameManager && this.emu.gameManager.audioContext);
 
       if (!ctx) return null;
-      if (ctx.state !== "running") ctx.resume().catch(() => {});
+      if (ctx.state !== "running") ctx.resume().catch(() => { });
 
       let cap = tap && tap.caps.get(ctx);
       if (!cap) {
@@ -490,15 +490,32 @@ function patchNetplayAudio(netplay: any) {
   };
 }
 
-export const EJS_LCD_GRID_SHADER_GLSL = `#if defined(VERTEX)
+export const EJS_OFFICIAL_LCD_SHADER_GLSL = `/*
+   Author: Gigaherz
+   License: Public domain
+   Official Libretro LCD3x Shader
+*/
+
+#pragma parameter brighten_scanlines "Brighten Scanlines" 16.0 1.0 32.0 0.5
+#pragma parameter brighten_lcd "Brighten LCD" 4.0 1.0 12.0 0.1
+
+#ifdef PARAMETER_UNIFORM
+uniform COMPAT_PRECISION float brighten_scanlines;
+uniform COMPAT_PRECISION float brighten_lcd;
+#else
+#define brighten_scanlines 16.0
+#define brighten_lcd 4.0
+#endif
+
+#if defined(VERTEX)
 
 #if __VERSION__ >= 130
 #define COMPAT_VARYING out
 #define COMPAT_ATTRIBUTE in
 #define COMPAT_TEXTURE texture
 #else
-#define COMPAT_VARYING varying
-#define COMPAT_ATTRIBUTE attribute
+#define COMPAT_VARYING varying 
+#define COMPAT_ATTRIBUTE attribute 
 #define COMPAT_TEXTURE texture2D
 #endif
 
@@ -515,13 +532,9 @@ COMPAT_VARYING vec4 COL0;
 COMPAT_VARYING vec4 TEX0;
 
 uniform mat4 MVPMatrix;
-uniform COMPAT_PRECISION int FrameDirection;
-uniform COMPAT_PRECISION int FrameCount;
-uniform COMPAT_PRECISION vec2 OutputSize;
-uniform COMPAT_PRECISION vec2 TextureSize;
-uniform COMPAT_PRECISION vec2 InputSize;
 
-void main() {
+void main()
+{
     gl_Position = MVPMatrix * VertexCoord;
     COL0 = COLOR;
     TEX0.xy = TexCoord.xy;
@@ -534,7 +547,7 @@ void main() {
 #define COMPAT_TEXTURE texture
 out vec4 FragColor;
 #else
-#define COMPAT_VARYING varying
+#define COMPAT_VARYING varying 
 #define COMPAT_TEXTURE texture2D
 #define FragColor gl_FragColor
 #endif
@@ -545,23 +558,29 @@ out vec4 FragColor;
 #define COMPAT_PRECISION
 #endif
 
-uniform COMPAT_PRECISION int FrameDirection;
-uniform COMPAT_PRECISION int FrameCount;
-uniform COMPAT_PRECISION vec2 OutputSize;
 uniform COMPAT_PRECISION vec2 TextureSize;
 uniform COMPAT_PRECISION vec2 InputSize;
+uniform COMPAT_PRECISION vec2 OutputSize;
 uniform sampler2D Texture;
 COMPAT_VARYING vec4 TEX0;
 
-void main() {
-    vec2 texCoord = TEX0.xy;
-    vec4 color = COMPAT_TEXTURE(Texture, texCoord);
-    
-    vec2 pos = fract(texCoord * TextureSize);
-    vec2 grid = smoothstep(0.0, 0.15, pos) * smoothstep(1.0, 0.85, pos);
-    float mask = grid.x * grid.y * 0.3 + 0.7;
-    
-    FragColor = vec4(color.rgb * mask, color.a);
+void main()
+{
+    vec2 texcoord = TEX0.xy;
+    vec2 size = (TextureSize.x > 1.0) ? TextureSize : ((InputSize.x > 1.0) ? InputSize : vec2(320.0, 240.0));
+    vec2 factor = texcoord * size;
+    vec2 pos = fract(factor);
+
+    vec4 color = COMPAT_TEXTURE(Texture, texcoord);
+
+    vec2 grid = abs(sin(pos * 3.14159265));
+    vec3 lcd = vec3(
+        mix(1.0, grid.x, 1.0 / brighten_lcd),
+        mix(1.0, grid.y, 1.0 / brighten_scanlines),
+        mix(1.0, grid.x, 1.0 / brighten_lcd)
+    );
+
+    FragColor = vec4(color.rgb * lcd, color.a);
 }
 
 #endif
@@ -570,7 +589,7 @@ void main() {
 export function installEJSShaders() {
   const w = window as any;
   w.EJS_shaders = {
-    "LCD Grid": EJS_LCD_GRID_SHADER_GLSL,
+    LCD: EJS_OFFICIAL_LCD_SHADER_GLSL,
     ...(w.EJS_shaders || {}),
   };
 }
@@ -623,7 +642,7 @@ function isIOSFullscreenShimRequired() {
 
 export function installIOSFullscreenShim() {
   if (!isIOSFullscreenShimRequired()) {
-    return () => {};
+    return () => { };
   }
 
   const proto = HTMLElement.prototype;
