@@ -340,6 +340,7 @@ function installDefaultOptionsFallback(emulator: any) {
 function installAudioTap() {
   const w = window as any;
   if (w.__ejsNetplayAudioTapInstalled) return;
+  if (typeof AudioNode === "undefined") return;
   w.__ejsNetplayAudioTapInstalled = true;
 
   const savedVolStr = localStorage.getItem("romm_saved_volume") || localStorage.getItem("volume");
@@ -350,9 +351,9 @@ function installAudioTap() {
     caps: new WeakMap(),
     last: null as AudioContext | null,
   });
-  const origConnect = AudioNode.prototype.connect;
+  const origConnect = AudioNode.prototype.connect as any;
 
-  AudioNode.prototype.connect = function (this: AudioNode, target: any) {
+  AudioNode.prototype.connect = function (this: AudioNode, target: any): any {
     try {
       const ctx = this.context as AudioContext & { __masterVolumeGain?: GainNode };
       if (ctx && target === ctx.destination) {

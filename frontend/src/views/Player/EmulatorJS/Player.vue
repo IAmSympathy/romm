@@ -90,6 +90,7 @@ declare global {
     EJS_controlScheme: string | null;
     EJS_defaultOptions: object;
     EJS_defaultControls: object;
+    EJS_mouse?: boolean;
     EJS_emulator: any; // eslint-disable-line @typescript-eslint/no-explicit-any
     EJS_language: string;
     EJS_disableAutoLang: boolean;
@@ -130,6 +131,26 @@ declare global {
   }
 }
 
+function getDefaultMouseCoreOptions(core: string): Record<string, string> {
+  switch (core) {
+    case "melonds":
+      return { melonds_touch_mode: "touch" };
+    case "desmume":
+    case "desmume2015":
+      return { desmume_pointer_type: "mouse" };
+    case "fceumm":
+      return { fceumm_zapper_mode: "mouse" };
+    case "nestopia":
+      return { nestopia_zapper_device: "mouse" };
+    case "snes9x":
+      return { snes9x_opt_device_p2: "mouse" };
+    case "bsnes":
+      return { bsnes_opt_device_p2: "mouse" };
+    default:
+      return {};
+  }
+}
+
 const supportedCores = getSupportedEJSCores(
   romRef.value.platform_slug,
   configStore.config.EJS_NETPLAY_ENABLED,
@@ -153,6 +174,7 @@ window.EJS_player = "#game";
 window.EJS_color = "#A453FF";
 window.EJS_alignStartButton = "center";
 window.EJS_startOnLoaded = true;
+window.EJS_mouse = true;
 window.EJS_backgroundImage = `${window.location.origin}/assets/logos/romm_logo_xbox_one_circle_boot.svg`;
 window.EJS_backgroundColor = theme.current.value.colors.background;
 window.EJS_Buttons = {
@@ -160,10 +182,12 @@ window.EJS_Buttons = {
   exitEmulation: false,
 };
 const coreOptions = configStore.getEJSCoreOptions(window.EJS_core);
+const mouseCoreOptions = getDefaultMouseCoreOptions(window.EJS_core);
 window.EJS_defaultOptions = {
   // Force saving saves and states to the browser
   "save-state-location": "browser",
   rewindEnabled: "enabled",
+  ...mouseCoreOptions,
   ...coreOptions,
 };
 const ejsControls = configStore.getEJSControls(props.core);
@@ -195,8 +219,15 @@ if (EJS_CACHE_LIMIT !== null) window.EJS_CacheLimit = EJS_CACHE_LIMIT;
 
 installEJSDefaultOptionsTrap();
 
+function preventContextMenu(e: MouseEvent) {
+  e.preventDefault();
+}
+
 onMounted(() => {
   window.scrollTo(0, 0);
+  const gameContainer = document.getElementById("game");
+  gameContainer?.addEventListener("contextmenu", preventContextMenu);
+
   if (props.bios) {
     localStorage.setItem(
       `player:${romRef.value.platform_slug}:bios_id`,
@@ -232,6 +263,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(async () => {
+  const gameContainer = document.getElementById("game");
+  gameContainer?.removeEventListener("contextmenu", preventContextMenu);
   emitter?.off("saveSelected", loadSave);
   emitter?.off("stateSelected", loadState);
   window.EJS_emulator?.callEvent("exit");
