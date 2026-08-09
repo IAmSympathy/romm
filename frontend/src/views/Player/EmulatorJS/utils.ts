@@ -490,6 +490,48 @@ function patchNetplayAudio(netplay: any) {
   };
 }
 
+export const EJS_LCD_SHADER_GLSL = `#ifdef GL_ES
+precision mediump float;
+#endif
+
+#if __VERSION__ >= 130
+#define COMPAT_VARYING in
+#define COMPAT_TEXTURE texture
+out vec4 FragColor;
+#else
+#define COMPAT_VARYING varying
+#define COMPAT_TEXTURE texture2D
+#define FragColor gl_FragColor
+#endif
+
+uniform sampler2D Texture;
+COMPAT_VARYING vec2 TEX0;
+uniform vec2 TextureSize;
+
+void main() {
+    vec2 texCoord = TEX0;
+    vec4 color = COMPAT_TEXTURE(Texture, texCoord);
+    
+    vec2 pos = fract(texCoord * TextureSize);
+    vec2 grid = smoothstep(0.0, 0.12, pos) * smoothstep(1.0, 0.88, pos);
+    float mask = grid.x * grid.y * 0.25 + 0.75;
+    
+    FragColor = vec4(color.rgb * mask, color.a);
+}
+`;
+
+export function installEJSShaders() {
+  const w = window as any;
+  w.EJS_shaders = {
+    LCD: EJS_LCD_SHADER_GLSL,
+    "LCD 3x": EJS_LCD_SHADER_GLSL,
+    lcd: EJS_LCD_SHADER_GLSL,
+    lcd3x: EJS_LCD_SHADER_GLSL,
+    "lcd3x.glslp": EJS_LCD_SHADER_GLSL,
+    ...(w.EJS_shaders || {}),
+  };
+}
+
 // Trap the window.EJS_emulator assignment so the instance is patched right
 // after the constructor returns, before the async core download and boot
 // consume any of the patched values. Patching later (e.g. in EJS_onGameStart)
@@ -497,6 +539,7 @@ function patchNetplayAudio(netplay: any) {
 // options file are written, and saved settings were already applied.
 export function installEJSDefaultOptionsTrap() {
   installAudioTap();
+  installEJSShaders();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let instance: any;
   Object.defineProperty(window, "EJS_emulator", {

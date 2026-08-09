@@ -90,6 +90,7 @@ declare global {
     EJS_controlScheme: string | null;
     EJS_defaultOptions: object;
     EJS_defaultControls: object;
+    EJS_shaders?: Record<string, string>;
     EJS_mouse?: boolean;
     EJS_emulator: any; // eslint-disable-line @typescript-eslint/no-explicit-any
     EJS_language: string;
