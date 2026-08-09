@@ -161,3 +161,30 @@ div#game .ejs_popup_box {
   min-height: 200px !important;
   width: auto !important;
 }
+
+/* 6. OVERLAY POINTER-EVENTS SAFETY */
+/* Ensure transparent overlay containers never block pointer events from reaching the game canvas */
+div#game .ejs_menu_bar_parent,
+div#game .ejs_control_container,
+div#game .ejs_parent,
+div#game .ejs_game_container {
+  pointer-events: none !important;
+}
+
+/* Guarantee canvas receives pointer events */
+div#game canvas {
+  pointer-events: auto !important;
+  cursor: crosshair;
+}
+
+/* Re-enable pointer events for interactive controls, menus and popups */
+div#game .ejs_menu_bar,
+div#game .ejs_menu_button,
+div#game .ejs_popup_container,
+div#game .romm-popup-close-btn,
+div#game input,
+div#game button,
+div#game a,
+div#game select {
+  pointer-events: auto !important;
+}

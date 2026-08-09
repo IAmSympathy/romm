@@ -223,10 +223,119 @@ function preventContextMenu(e: MouseEvent) {
   e.preventDefault();
 }
 
+function initEJSInputDiagnostics() {
+  const gameContainer = document.getElementById("game");
+  if (!gameContainer) return;
+
+  let hud = document.getElementById("ejs-mouse-diag-hud");
+  if (!hud) {
+    hud = document.createElement("div");
+    hud.id = "ejs-mouse-diag-hud";
+    hud.style.cssText = `
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 100000;
+      background: rgba(15, 23, 42, 0.9);
+      color: #f8fafc;
+      font-family: monospace;
+      font-size: 11px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      pointer-events: none;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      line-height: 1.4;
+      max-width: 340px;
+    `;
+    hud.innerHTML = `<div>[EJS Mouse Diagnostic HUD Initialized]</div>`;
+    document.body.appendChild(hud);
+  }
+
+  const logDiag = (type: string, e: MouseEvent | TouchEvent) => {
+    let clientX = 0;
+    let clientY = 0;
+    if ("clientX" in e) {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    } else if (e.touches && e.touches.length > 0) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    }
+
+    const hoveredEl = document.elementFromPoint(clientX, clientY);
+    const hoveredTag = hoveredEl
+      ? `${hoveredEl.tagName.toLowerCase()}${hoveredEl.className ? "." + Array.from(hoveredEl.classList).slice(0, 2).join(".") : ""}`
+      : "none";
+    const activeTag = document.activeElement
+      ? `${document.activeElement.tagName.toLowerCase()}${document.activeElement.className ? "." + Array.from(document.activeElement.classList).slice(0, 2).join(".") : ""}`
+      : "none";
+
+    const canvas = gameContainer.querySelector("canvas");
+    let relX = "N/A";
+    let relY = "N/A";
+    if (canvas) {
+      const rect = canvas.getBoundingClientRect();
+      relX = `${Math.round(((clientX - rect.left) / rect.width) * 100)}%`;
+      relY = `${Math.round(((clientY - rect.top) / rect.height) * 100)}%`;
+    }
+
+    console.log(
+      `[EJS Mouse Diagnostic] ${type} | pos: (${clientX}, ${clientY}) | canvasRel: (${relX}, ${relY}) | hovered: <${hoveredTag}> | active: <${activeTag}>`,
+    );
+
+    if (hud) {
+      hud.innerHTML = `
+        <div style="font-weight:bold;color:#38bdf8;">[EJS Mouse Diagnostic HUD]</div>
+        <div>Event: <b style="color:#4ade80">${type}</b></div>
+        <div>Pos: (${clientX}, ${clientY}) | Canvas: (${relX}, ${relY})</div>
+        <div>Hovered: <code style="color:#a7f3d0">&lt;${hoveredTag}&gt;</code></div>
+        <div>Focus: <code style="color:#fde047">&lt;${activeTag}&gt;</code></div>
+        <div>Core: <b>${window.EJS_core || "N/A"}</b> | EJS_mouse: <b>${String(window.EJS_mouse)}</b></div>
+      `;
+    }
+  };
+
+  const events = [
+    "mousemove",
+    "mousedown",
+    "mouseup",
+    "click",
+    "pointermove",
+    "pointerdown",
+    "pointerup",
+    "touchstart",
+    "touchmove",
+    "touchend",
+  ];
+
+  events.forEach((evtName) => {
+    window.addEventListener(
+      evtName,
+      (e) => logDiag(evtName, e as MouseEvent | TouchEvent),
+      { capture: true, passive: true },
+    );
+  });
+
+  const ensureCanvasFocus = () => {
+    const canvas = gameContainer.querySelector("canvas");
+    if (canvas) {
+      if (!canvas.hasAttribute("tabindex")) {
+        canvas.setAttribute("tabindex", "1");
+      }
+      canvas.focus();
+    }
+  };
+
+  gameContainer.addEventListener("mousedown", ensureCanvasFocus);
+  gameContainer.addEventListener("touchstart", ensureCanvasFocus);
+}
+
 onMounted(() => {
   window.scrollTo(0, 0);
   const gameContainer = document.getElementById("game");
   gameContainer?.addEventListener("contextmenu", preventContextMenu);
+  initEJSInputDiagnostics();
 
   if (props.bios) {
     localStorage.setItem(
@@ -265,6 +374,8 @@ onMounted(() => {
 onBeforeUnmount(async () => {
   const gameContainer = document.getElementById("game");
   gameContainer?.removeEventListener("contextmenu", preventContextMenu);
+  const hud = document.getElementById("ejs-mouse-diag-hud");
+  hud?.remove();
   emitter?.off("saveSelected", loadSave);
   emitter?.off("stateSelected", loadState);
   window.EJS_emulator?.callEvent("exit");
@@ -427,6 +538,7 @@ window.EJS_onGameStart = async () => {
   // emulator's own start hook keeps the flag true for any entry point.
   playing.value = true;
   initEmulatorJSPopupObserver();
+  initEJSInputDiagnostics();
 
   // Install netplay overrides synchronously, before any await below, so they
   // are in place before room polling or a Create/Join action can start.
