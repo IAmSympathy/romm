@@ -139,13 +139,26 @@ function getDefaultMouseCoreOptions(core: string): Record<string, string> {
     case "desmume2015":
       return { desmume_pointer_type: "mouse" };
     case "fceumm":
-      return { fceumm_zapper_mode: "mouse" };
+      return {
+        fceumm_zapper_mode: "pointer",
+        fceumm_show_crosshair: "enabled",
+      };
     case "nestopia":
-      return { nestopia_zapper_device: "mouse" };
+      return {
+        nestopia_zapper_device: "pointer",
+        nestopia_show_crosshair: "enabled",
+        nestopia_zapper_crosshair: "enabled",
+      };
     case "snes9x":
-      return { snes9x_opt_device_p2: "mouse" };
+      return {
+        snes9x_opt_device_p2: "pointer",
+        snes9x_show_crosshair: "enabled",
+      };
     case "bsnes":
-      return { bsnes_opt_device_p2: "mouse" };
+      return {
+        bsnes_opt_device_p2: "pointer",
+        bsnes_show_crosshair: "enabled",
+      };
     default:
       return {};
   }
