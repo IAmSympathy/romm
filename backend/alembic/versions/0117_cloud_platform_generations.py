@@ -1,7 +1,7 @@
 """Update platform generations for ZX Spectrum and Cloud Gaming platforms
 
-Revision ID: 0108_cloud_platform_generations
-Revises: 0107_roms_dedup_cover_index
+Revision ID: 0117_cloud_platform_generations
+Revises: 0116_sigil_title_ids
 Create Date: 2026-08-02 00:00:00.000000
 
 """
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "0108_cloud_platform_generations"
-down_revision = "0107_roms_dedup_cover_index"
+revision = "0117_cloud_platform_generations"
+down_revision = "0116_sigil_title_ids"
 branch_labels = None
 depends_on = None
 
