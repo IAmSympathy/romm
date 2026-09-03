@@ -4,9 +4,10 @@ from typing import Any, NotRequired, TypedDict
 
 import httpx
 import pydash
+import yarl
 from fastapi import HTTPException, status
 
-from config import DEV_MODE, HASHEOUS_API_ENABLED
+from config import DEV_MODE, HASHEOUS_API_ENABLED, HASHEOUS_API_URL
 from logger.logger import log
 from models.rom import RomFile
 from utils import get_version
@@ -58,6 +59,18 @@ class HasheousRom(BaseRom):
 ACCEPTABLE_FILE_EXTENSIONS_BY_PLATFORM_SLUG = {UPS.DC: ["bin", "chd", "cue"]}
 
 
+def _involved_company_names(rom: dict[str, Any], role: str) -> list[str]:
+    """Company names for an IGDB involvement role.
+
+    The proxy keys its expanded lists by id, so involvements arrive as a dict
+    rather than the list IGDB itself returns.
+    """
+    involved = pydash.values(rom.get("involved_companies", {}))
+    return pydash.compact(
+        pydash.map_([c for c in involved if c.get(role)], "company.name")
+    )
+
+
 def extract_metadata_from_igdb_rom(rom: dict[str, Any]) -> IGDBMetadata:
     return IGDBMetadata(
         {
@@ -88,6 +101,8 @@ def extract_metadata_from_igdb_rom(rom: dict[str, Any]) -> IGDBMetadata:
             "companies": pydash.compact(
                 pydash.map_(rom.get("involved_companies", {}), "company.name")
             ),
+            "publishers": _involved_company_names(rom, "publisher"),
+            "developers": _involved_company_names(rom, "developer"),
             "platforms": [
                 IGDBMetadataPlatform(igdb_id=p.get("id", ""), name=p.get("name", ""))
                 for p in pydash.map_(rom.get("platforms", {}))
@@ -113,11 +128,16 @@ def extract_metadata_from_igdb_rom(rom: dict[str, Any]) -> IGDBMetadata:
 
 class HasheousHandler(MetadataHandler):
     def __init__(self) -> None:
-        self.BASE_URL = (
-            "https://beta.hasheous.org/api/v1"
-            if DEV_MODE
-            else "https://hasheous.org/api/v1"
-        )
+        self.BASE_URL = HASHEOUS_API_URL
+        # Cover art is linked relative to the site root, not the API path.
+        try:
+            self.BASE_ORIGIN = str(yarl.URL(self.BASE_URL).origin())
+        except ValueError:
+            log.warning(
+                "Invalid HASHEOUS_API_URL %r, cover art URLs may be wrong",
+                self.BASE_URL,
+            )
+            self.BASE_ORIGIN = ""
         self.healthcheck_endpoint = f"{self.BASE_URL}/HealthCheck"
         self.platform_endpoint = f"{self.BASE_URL}/Lookup/Platforms"
         self.games_endpoint = f"{self.BASE_URL}/Lookup/ByHash"
@@ -270,17 +290,12 @@ class HasheousHandler(MetadataHandler):
         # against any of them.
         data: list[dict] = []
         for file in filtered_files:
-            file_hashes: dict[str, str | None]
-            if file.chd_sha1_hash:
-                # CHD files are indexed by disc-data SHA1 only
-                # Raw file MD5/CRC are hashes of the container and won't match
-                file_hashes = {"shA1": file.chd_sha1_hash}
-            else:
-                file_hashes = {
-                    "mD5": file.md5_hash,
-                    "shA1": file.sha1_hash,
-                    "crc": file.crc_hash,
-                }
+            hashes = file.lookup_hashes
+            file_hashes: dict[str, str | None] = {
+                "mD5": hashes.md5,
+                "shA1": hashes.sha1,
+                "crc": hashes.crc,
+            }
 
             # Drop empty hashes and skip files that have none.
             file_hashes = {key: value for key, value in file_hashes.items() if value}
@@ -336,7 +351,7 @@ class HasheousHandler(MetadataHandler):
         url_cover = ""
         for attr in attributes:
             if attr["attributeName"] == "Logo":
-                url_cover = f"https://hasheous.org{attr['link']}"
+                url_cover = f"{self.BASE_ORIGIN}{attr['link']}"
                 break
 
         return (
@@ -826,6 +841,14 @@ HASHEOUS_PLATFORM_LIST: dict[UPS, SlugToHasheousId] = {
         "ra_id": 40,
         "tgdb_id": None,
     },
+    UPS.DOOM: {
+        "id": 645195,
+        "igdb_id": None,
+        "igdb_slug": "",
+        "name": "PrBoom",
+        "ra_id": None,
+        "tgdb_id": None,
+    },
     UPS.DOS: {
         "id": 233075,
         "igdb_id": 13,
@@ -848,6 +871,14 @@ HASHEOUS_PLATFORM_LIST: dict[UPS, SlugToHasheousId] = {
         "igdb_slug": "fairchild-channel-f",
         "name": "Fairchild Channel F",
         "ra_id": 57,
+        "tgdb_id": None,
+    },
+    UPS.FAMICOM: {
+        "id": 68,
+        "igdb_id": 18,
+        "igdb_slug": "nes",
+        "name": "Nintendo Entertainment System",
+        "ra_id": 7,
         "tgdb_id": None,
     },
     UPS.FDS: {

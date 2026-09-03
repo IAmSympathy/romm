@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import Body, File, HTTPException, Request, UploadFile, status
+from fastapi import Body, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse
 
 from decorators.auth import protected_route
@@ -21,6 +21,7 @@ from models.assets import State
 from utils.filesystem import sanitize_filename
 from utils.router import APIRouter
 from utils.uploads import check_asset_upload_size
+from utils.validation import RomIdScope, narrow_rom_id_scope
 
 router = APIRouter(
     prefix="/states",
@@ -52,6 +53,8 @@ async def add_state(
     rom = db_rom_handler.get_rom(rom_id)
     if not rom:
         raise RomNotFoundInDatabaseException(rom_id)
+
+    assert_rom_visible(request, rom)
 
     log.info(f"Uploading state of {rom.name}")
 
@@ -101,7 +104,6 @@ async def add_state(
         rom_id=rom_id,
         emulator=emulator,
     )
-
     if is_arcade:
         from sqlalchemy import select
         from decorators.database import sync_session
@@ -114,17 +116,24 @@ async def add_state(
 
         if existing_states:
             db_state = existing_states[0]
+            stale_full_path = db_state.full_path
             db_state = db_state_handler.update_state(
                 db_state.id,
                 {
                     "file_name": sanitized_state_filename,
                     "file_size_bytes": scanned_state.file_size_bytes,
+                    "file_path": scanned_state.file_path,
                     "user_id": request.user.id,
                     "emulator": emulator,
                     "is_public": True,
                     "updated_at": datetime.now(timezone.utc),
                 },
             )
+            if stale_full_path != db_state.full_path:
+                try:
+                    await fs_asset_handler.remove_file(stale_full_path)
+                except FileNotFoundError:
+                    pass
             for extra_state in existing_states[1:]:
                 db_state_handler.delete_state(extra_state.id)
         else:
@@ -139,13 +148,21 @@ async def add_state(
             user_id=request.user.id, rom_id=rom.id, file_name=sanitized_state_filename
         )
         if db_state:
+            stale_full_path = db_state.full_path
             db_state = db_state_handler.update_state(
                 db_state.id,
                 {
                     "file_size_bytes": scanned_state.file_size_bytes,
+                    "file_path": scanned_state.file_path,
+                    "emulator": emulator,
                     "is_public": effective_is_public,
                 },
             )
+            if stale_full_path != db_state.full_path:
+                try:
+                    await fs_asset_handler.remove_file(stale_full_path)
+                except FileNotFoundError:
+                    pass
         else:
             scanned_state.rom_id = rom.id
             scanned_state.user_id = request.user.id
@@ -256,10 +273,25 @@ async def add_state(
 
 @protected_route(router.get, "", [Scope.ASSETS_READ])
 def get_states(
-    request: Request, rom_id: int | None = None, platform_id: int | None = None
+    request: Request,
+    rom_id: int | None = None,
+    rom_ids: Annotated[
+        RomIdScope,
+        Query(
+            description=(
+                "ROM IDs to scope the results to, for clients syncing a known "
+                "set of ROMs. Multiple values are allowed by repeating the "
+                "parameter. Combined with `rom_id` when both are given."
+            ),
+        ),
+    ] = None,
+    platform_id: int | None = None,
 ) -> list[StateSchema]:
+    """Retrieve states for the current user."""
     states = db_state_handler.get_states(
-        user_id=request.user.id, rom_id=rom_id, platform_id=platform_id
+        user_id=request.user.id,
+        rom_ids=narrow_rom_id_scope(rom_id, rom_ids),
+        platform_id=platform_id,
     )
 
     return [StateSchema.model_validate(state) for state in states]

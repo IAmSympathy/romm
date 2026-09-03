@@ -39,7 +39,6 @@
 // `rom.delete` permission. Each file is removed from disk and the DB
 // row is dropped via `DELETE /roms/{rom_id}/files/{file_id}`.
 import { RBtn, RCheckbox, REmptyState, RIcon, RTooltip } from "@v2/lib";
-import axios from "axios";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
@@ -53,7 +52,9 @@ import storeRoms from "@/stores/roms";
 import { getDownloadLink } from "@/utils";
 import { useCan } from "@/v2/composables/useCan";
 import { useConfirm } from "@/v2/composables/useConfirm";
+import { useRomSync } from "@/v2/composables/useRomSync";
 import { useSnackbar } from "@/v2/composables/useSnackbar";
+import { errorMessage } from "@/v2/utils/errorMessage";
 import FileRow from "./FileRow.vue";
 import FilesSummary from "./FilesSummary.vue";
 
@@ -67,20 +68,12 @@ const confirm = useConfirm();
 const route = useRoute();
 const router = useRouter();
 const romsStore = storeRoms();
+const { syncCachedRom } = useRomSync();
 
 const canUpload = useCan("rom.upload");
 const hasDeleteGrant = useCan("rom.delete");
 // `DELETE /roms/{id}/files/{file_id}` gates on ROMS_WRITE
 const canDelete = computed(() => hasDeleteGrant.value && canUpload.value);
-
-function errorMessage(err: unknown): string {
-  if (axios.isAxiosError(err)) {
-    const detail = err.response?.data?.detail;
-    if (typeof detail === "string" && detail) return detail;
-    return err.message;
-  }
-  return String(err);
-}
 
 // ---------- Category metadata ----------
 // Drives per-file category chips (one per `RomFileCategory` enum
@@ -106,6 +99,10 @@ const CATEGORY_META = computed<
   manual: {
     label: t("rom.manual"),
     icon: "mdi-book-open-page-variant-outline",
+  },
+  walkthrough: {
+    label: t("rom.walkthrough"),
+    icon: "mdi-map-legend",
   },
   soundtrack: {
     label: t("rom.soundtrack"),
@@ -153,6 +150,8 @@ const FOLDER_META = computed<Record<string, FolderMeta>>(() => {
     cheats: c.cheat,
     manual: c.manual,
     manuals: c.manual,
+    walkthrough: c.walkthrough,
+    walkthroughs: c.walkthrough,
     soundtrack: c.soundtrack,
     soundtracks: c.soundtrack,
     // Non-category folders that conventionally appear in ROM directories.
@@ -578,7 +577,7 @@ async function refreshRom() {
   try {
     const { data } = await romApi.getRom({ romId: props.rom.id });
     romsStore.currentRom = data;
-    romsStore.update(data);
+    syncCachedRom(data);
   } catch (error) {
     console.error(error);
   }

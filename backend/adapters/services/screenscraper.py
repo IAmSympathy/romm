@@ -1,4 +1,5 @@
 import asyncio
+import enum
 import http
 import json
 import re
@@ -22,6 +23,7 @@ from config import (
     SCREENSCRAPER_PASSWORD,
     SCREENSCRAPER_USER,
 )
+from logger.formatter import redact_sensitive
 from logger.logger import log
 from utils import get_version
 from utils.context import create_aiohttp_session, ctx_aiohttp_session
@@ -29,6 +31,8 @@ from utils.rate_limiter import ConcurrencyLimiter, RateLimiter
 
 import base64
 
+# ScreenScraper answers a refused credential set with a 200 and this marker in the
+# body, so the text is checked before the status.
 DEFAULT_SS_DEV_ID: Final = base64.b64decode("enVyZGkxNQ==").decode()
 DEFAULT_SS_DEV_PASSWORD: Final = base64.b64decode("Z2RERkQ0R0ZnM1Jt").decode()
 LOGIN_ERROR_CHECK: Final = "Erreur de login"
@@ -94,6 +98,43 @@ class ScreenScraperRateLimitError(HTTPException):
         )
 
 
+class SSCredentialSet(enum.StrEnum):
+    """Whose credentials ScreenScraper refused."""
+
+    USER = "user"
+    DEVELOPER = "developer"
+
+
+CREDENTIAL_DETAILS: Final[dict[SSCredentialSet, str]] = {
+    SSCredentialSet.USER: (
+        "ScreenScraper rejected your user account credentials. Check "
+        "SCREENSCRAPER_USER and SCREENSCRAPER_PASSWORD."
+    ),
+    SSCredentialSet.DEVELOPER: "ScreenScraper rejected the RomM developer credentials.",
+}
+
+
+class ScreenScraperCredentialsError(HTTPException):
+    """Raised when ScreenScraper refuses one of the two credential sets.
+
+    Nothing clears this within a scan: the fix is a configuration change, and the
+    credentials are read at startup.
+
+    Reported the way a blacklisted application version is, the other refusal an
+    operator has to act on. Never as a 401: it is RomM's credentials the provider
+    refused, not the caller's, and the frontend reads a 401 as an expired session
+    and sends the user back to the login page.
+    """
+
+    def __init__(self, credential_set: SSCredentialSet, message: str = "") -> None:
+        self.credential_set = credential_set
+        detail = CREDENTIAL_DETAILS[credential_set]
+        if message:
+            detail = f"{detail} ScreenScraper said: {message}"
+
+        super().__init__(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
 @dataclass(frozen=True)
 class SSAccountLimits:
     """The per-account allowances ScreenScraper reports on every response."""
@@ -145,7 +186,14 @@ class _ScanState:
     and media downloads go through the limiters without a service at all.
     """
 
+    # The account allowances read from the most recent response, if any. They govern
+    # how fast we may scrape (threads and requests per minute), how much of the
+    # daily quota is left, and how slowly media will download.
     account_limits: SSAccountLimits | None = None
+
+    # The one-shot advisories that are logged once per scan, so the log is not
+    # flooded with the same warning for every ROM. They are reset at the start of
+    # a scan so the next scan can report them again.
     logged_worker_advisory: bool = False
     logged_low_quota_warning: bool = False
 
@@ -155,6 +203,12 @@ class _ScanState:
     # breaker on the first daily-quota error so the remaining requests
     # short-circuit instead of hammering a dead quota.
     daily_quota_exhausted: bool = False
+
+    # A refused credential set (HTTP 403) is refused for every request that
+    # follows, so it trips a breaker of its own rather than costing a round trip
+    # per ROM to be told the same thing. Holds which set, so the requests that
+    # short-circuit report the same thing the first one did.
+    credentials_rejected: SSCredentialSet | None = None
 
     def reset(self) -> None:
         for f in fields(self):
@@ -185,6 +239,90 @@ def _trip_daily_quota(reason: str) -> None:
     _state.daily_quota_exhausted = True
 
 
+def _error_message(body: str) -> str:
+    """Condense a ScreenScraper error body into a single reportable line.
+
+    The reply reaches the caller as well as the log, and the credentials travel
+    in the query string, so anything credential-shaped is masked the way the log
+    formatter masks it.
+    """
+    message = " ".join(body.split())
+    if message.startswith("<"):
+        return ""
+
+    # ScreenScraper's error bodies are a single short line of plain text. Anything
+    # longer, or marked up, is a page rather than a message.
+    return redact_sensitive(message[:200])
+
+
+def _credential_set(url: str, message: str) -> SSCredentialSet:
+    """Work out which credential set a refusal is about."""
+
+    # ScreenScraper names the developer credentials in the refusal itself, but only
+    # from the scraping endpoints; the account endpoint blames the account whichever
+    # set is actually at fault.
+    if "développeur" in message.lower():
+        return SSCredentialSet.DEVELOPER
+
+    if "ssuserInfos.php" in url:
+        return SSCredentialSet.USER
+
+    return SSCredentialSet.DEVELOPER
+
+
+def _reject_credentials(url: str, message: str = "") -> ScreenScraperCredentialsError:
+    """Trip the credentials breaker, reporting the cause once."""
+    error = ScreenScraperCredentialsError(_credential_set(url, message), message)
+    if _state.credentials_rejected != error.credential_set:
+        log.error(error.detail)
+    _state.credentials_rejected = error.credential_set
+
+    return error
+
+
+def _handle_client_error(url: str, err: aiohttp.ClientResponseError) -> dict:
+    """Map one of ScreenScraper's documented statuses onto a clear error.
+
+    Returns an empty response for the ones a scan can carry on through, and
+    raises for the ones a caller has to hear about.
+    """
+    if err.status == http.HTTPStatus.FORBIDDEN:
+        raise _reject_credentials(url) from err
+    elif err.status == http.HTTPStatus.UNAUTHORIZED:
+        # Both halves come from ScreenScraper's own error table, which gives the
+        # closure as the description and the saturation as its cause.
+        log.warning(
+            "ScreenScraper closed the API to non-members and inactive members; "
+            "it gives server saturation (CPU >60%) as the cause"
+        )
+        return {}
+    elif err.status == 423:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ScreenScraper API is currently offline.",
+        ) from err
+    elif err.status == 426:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="ScreenScraper has blacklisted this application version. Please update RomM.",
+        ) from err
+    elif err.status == 430:
+        _trip_daily_quota("daily scrape quota exhausted")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="ScreenScraper daily scrape quota exhausted. It resets at midnight CET.",
+        ) from err
+    elif err.status == 431:
+        _trip_daily_quota("daily unrecognized-ROM quota exhausted")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="ScreenScraper daily unrecognized-ROM quota exhausted. It resets at midnight CET.",
+        ) from err
+
+    log.error(err)
+    return {}
+
+
 def reset_scan_state() -> None:
     """Clear the per-scan ScreenScraper state at the start of a scan.
 
@@ -206,7 +344,7 @@ def get_account_limits() -> SSAccountLimits | None:
     return _state.account_limits
 
 
-def _parse_int(value: object, *, minimum: int = 0) -> int | None:
+def _parse_ss_int(value: object, *, minimum: int = 0) -> int | None:
     """Read one of the account's numeric fields, ignoring absent or junk values."""
     try:
         parsed = int(str(value))
@@ -218,15 +356,19 @@ def _parse_int(value: object, *, minimum: int = 0) -> int | None:
 
 def _read_account_limits(ssuser: SSUser) -> SSAccountLimits:
     return SSAccountLimits(
-        max_threads=_parse_int(ssuser.get("maxthreads"), minimum=1),
-        max_requests_per_minute=_parse_int(ssuser.get("maxrequestspermin"), minimum=1),
-        max_requests_per_day=_parse_int(ssuser.get("maxrequestsperday"), minimum=1),
-        requests_today=_parse_int(ssuser.get("requeststoday")),
-        max_ko_requests_per_day=_parse_int(
+        max_threads=_parse_ss_int(ssuser.get("maxthreads"), minimum=1),
+        max_requests_per_minute=_parse_ss_int(
+            ssuser.get("maxrequestspermin"), minimum=1
+        ),
+        max_requests_per_day=_parse_ss_int(ssuser.get("maxrequestsperday"), minimum=1),
+        requests_today=_parse_ss_int(ssuser.get("requeststoday")),
+        max_ko_requests_per_day=_parse_ss_int(
             ssuser.get("maxrequestskoperday"), minimum=1
         ),
-        ko_requests_today=_parse_int(ssuser.get("requestskotoday")),
-        max_download_speed_kbps=_parse_int(ssuser.get("maxdownloadspeed"), minimum=1),
+        ko_requests_today=_parse_ss_int(ssuser.get("requestskotoday")),
+        max_download_speed_kbps=_parse_ss_int(
+            ssuser.get("maxdownloadspeed"), minimum=1
+        ),
     )
 
 
@@ -409,10 +551,25 @@ async def prime_account_limits() -> SSAccountLimits | None:
 
     try:
         await ScreenScraperService().get_user_info()
+    except ScreenScraperCredentialsError:
+        # The check reports, but it never takes the provider out: ScreenScraper
+        # refuses a developer id it accepted a minute earlier, and the scraping
+        # endpoints keep answering through it. The breaker is left to the
+        # requests a scan actually needs.
+        _state.credentials_rejected = None
+        # Already reported in full, so say only why no quota follows.
+        reason = "credentials rejected"
     except HTTPException as exc:
-        log.warning("ScreenScraper: could not read the account limits (%s)", exc.detail)
+        reason = str(exc.detail)
     except (TimeoutError, aiohttp.ClientError) as exc:
-        log.warning("ScreenScraper: could not read the account limits (%s)", exc)
+        reason = str(exc)
+    else:
+        # Several errors are swallowed into an empty response rather than raised,
+        # which used to leave a scan with no limits and nothing said about it.
+        reason = "" if _state.account_limits else "no account information came back"
+
+    if reason:
+        log.warning("ScreenScraper: could not read the account limits (%s)", reason)
 
     return _state.account_limits
 
@@ -446,6 +603,52 @@ class ScreenScraperService:
     ) -> None:
         self.url = yarl.URL(base_url or "https://api.screenscraper.fr/api2")
 
+    async def _attempt_request(self, url: str, request_timeout: int) -> dict:
+        """Make one request, and read the account allowances riding along on it.
+
+        A refusal explains itself in the body, so the body is read before the
+        status is raised: a 403 would otherwise abort the attempt with a bare
+        "Forbidden" and lose the one line that says what is wrong.
+        """
+        try:
+            aiohttp_session = ctx_aiohttp_session.get()
+        except LookupError:
+            aiohttp_session = create_aiohttp_session()
+
+        version = get_version()
+        if version == "development":
+            version = "3.7.3"
+
+        log.debug(
+            "API request: URL=%s, Timeout=%s",
+            url,
+            request_timeout,
+        )
+
+        async with _concurrency_limiter:
+            await _rate_limiter.acquire()
+            res = await aiohttp_session.get(
+                url,
+                headers={"user-agent": f"RomM/{version}"},
+                middlewares=(auth_middleware,),
+                timeout=ClientTimeout(total=request_timeout),
+            )
+            res_text = await res.text()
+            if LOGIN_ERROR_CHECK in res_text:
+                raise _reject_credentials(url, _error_message(res_text))
+
+            try:
+                res.raise_for_status()
+            except aiohttp.ClientResponseError as err:
+                if err.status == http.HTTPStatus.FORBIDDEN:
+                    raise _reject_credentials(url, _error_message(res_text)) from err
+                raise
+
+            data = await res.json(loads=_loads_lenient)
+
+        _update_account_limits(data)
+        return data
+
     async def _request(self, url: str, request_timeout: int = 120) -> dict:
         # Daily quota already exhausted earlier in this scan: skip the request but
         # still raise the quota error so callers (e.g. manual search) surface a
@@ -457,93 +660,47 @@ class ScreenScraperService:
                 detail="ScreenScraper daily quota exhausted. It resets at midnight CET.",
             )
 
-        try:
-            aiohttp_session = ctx_aiohttp_session.get()
-            owns_session = False
-        except LookupError:
-            aiohttp_session = create_aiohttp_session()
-            owns_session = True
-
-        version = get_version()
-        if version == "development":
-            version = "3.7.3"
-
-        request_url = yarl.URL(url).update_query(
-            {
-                "devid": SCREENSCRAPER_DEV_ID or DEFAULT_SS_DEV_ID,
-                "devpassword": SCREENSCRAPER_DEV_PASSWORD or DEFAULT_SS_DEV_PASSWORD,
-                "output": "json",
-                "softname": "romm",
-                "ssid": SCREENSCRAPER_USER or "",
-                "sspassword": SCREENSCRAPER_PASSWORD or "",
-            }
-        )
+        # Credentials already refused: the answer will not change until they are
+        # corrected, which takes a restart to pick up.
+        if _state.credentials_rejected:
+            raise ScreenScraperCredentialsError(_state.credentials_rejected)
 
         try:
-            log.debug(
-                "API request: URL=%s, Timeout=%s",
-                request_url,
-                request_timeout,
+            return await self._attempt_request(url, request_timeout)
+        except aiohttp.ServerTimeoutError:
+            # Retry the request once if it times out
+            pass
+        except aiohttp.ClientConnectionError as exc:
+            log.critical(
+                "Connection error: can't connect to ScreenScraper", exc_info=True
             )
-            try:
-                async with _concurrency_limiter:
-                    await _rate_limiter.acquire()
-                    res = await aiohttp_session.get(
-                        str(request_url),
-                        headers={"user-agent": f"RomM/{version}"},
-                        timeout=ClientTimeout(total=request_timeout),
-                    )
-                    res.raise_for_status()
-                    res_text = await res.text()
-                    if LOGIN_ERROR_CHECK in res_text:
-                        log.error("Invalid ScreenScraper credentials")
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="Invalid ScreenScraper credentials",
-                        )
-                    data = await res.json(loads=_loads_lenient)
-                _update_account_limits(data)
-                return data
-            except aiohttp.ServerTimeoutError:
-                # Retry the request once if it times out
-                pass
-            except aiohttp.ClientConnectionError as exc:
-                log.critical(
-                    "Connection error: can't connect to ScreenScraper", exc_info=True
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Can't connect to ScreenScraper, check your internet connection",
-                ) from exc
-            except aiohttp.ClientResponseError as err:
-                if err.status == http.HTTPStatus.TOO_MANY_REQUESTS:
-                    log.warning("ScreenScraper: rate limit hit, retrying after 2s")
-                    await asyncio.sleep(2)
-                elif err.status == 426:
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="ScreenScraper has blacklisted this application version. Please update RomM.",
-                    ) from err
-                elif err.status == 430:
-                    _trip_daily_quota("daily scrape quota exhausted")
-                    raise HTTPException(
-                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                        detail="ScreenScraper daily scrape quota exhausted. It resets at midnight CET.",
-                    ) from err
-                elif err.status == 431:
-                    _trip_daily_quota("daily unrecognized-ROM quota exhausted")
-                    raise HTTPException(
-                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                        detail="ScreenScraper daily unrecognized-ROM quota exhausted. It resets at midnight CET.",
-                    ) from err
-                elif err.status == 423:
-                    raise HTTPException(
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail="ScreenScraper API is currently offline.",
-                    ) from err
-                else:
-                    log.error(err)
-                    return {}
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Can't connect to ScreenScraper, check your internet connection",
+            ) from exc
+        except aiohttp.ClientResponseError as err:
+            if err.status != http.HTTPStatus.TOO_MANY_REQUESTS:
+                return _handle_client_error(url, err)
+
+            log.warning("ScreenScraper: rate limit hit, retrying after 2s")
+            await asyncio.sleep(2)
+        except json.JSONDecodeError as exc:
+            log.error("Error decoding JSON response from ScreenScraper: %s", exc)
+            return {}
+
+        try:
+            return await self._attempt_request(url, request_timeout)
+        except aiohttp.ServerTimeoutError as err:
+            log.error(err)
+            return {}
+        except aiohttp.ClientResponseError as err:
+            if err.status == http.HTTPStatus.TOO_MANY_REQUESTS:
+                # The pacing is behind the account's  per-minute budget.
+                # Surface it so the ROM is reported as skipped instead
+                # of quietly saved without our metadata.
+                raise ScreenScraperRateLimitError() from err
+
+            return _handle_client_error(url, err)
         except json.JSONDecodeError as exc:
             log.error("Error decoding JSON response from ScreenScraper: %s", exc)
             return {}

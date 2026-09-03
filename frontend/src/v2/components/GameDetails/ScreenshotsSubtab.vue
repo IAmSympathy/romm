@@ -13,7 +13,6 @@
 // Both uploadable sections use RDropzone (CTA when empty, overlay over the
 // grid when filled).
 import { RBtn, RDropzone } from "@v2/lib";
-import axios from "axios";
 import { storeToRefs } from "pinia";
 import { computed, defineAsyncComponent, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -25,7 +24,9 @@ import storeUpload from "@/stores/upload";
 import type { ScreenshotItem } from "@/v2/components/GameDetails/ScreenshotsTab.vue";
 import { useCan } from "@/v2/composables/useCan";
 import { useConfirm } from "@/v2/composables/useConfirm";
+import { useRomSync } from "@/v2/composables/useRomSync";
 import { useSnackbar } from "@/v2/composables/useSnackbar";
+import { errorMessage } from "@/v2/utils/errorMessage";
 
 const ScreenshotsTab = defineAsyncComponent(
   () => import("@/v2/components/GameDetails/ScreenshotsTab.vue"),
@@ -43,21 +44,13 @@ const IMAGE_EXTENSIONS = new Set([
   "avif",
 ]);
 
-function errorMessage(err: unknown): string {
-  if (axios.isAxiosError(err)) {
-    const detail = err.response?.data?.detail;
-    if (typeof detail === "string" && detail) return detail;
-    return err.message;
-  }
-  return err instanceof Error ? err.message : String(err);
-}
-
 const props = defineProps<{ rom: DetailedRom }>();
 
 const { t } = useI18n();
 const snackbar = useSnackbar();
 const confirm = useConfirm();
 const romsStore = storeRoms();
+const { syncCachedRom } = useRomSync();
 const uploadStore = storeUpload();
 const authStore = storeAuth();
 const { user } = storeToRefs(authStore);
@@ -134,7 +127,7 @@ async function refreshRom() {
   try {
     const { data } = await romApi.getRom({ romId: props.rom.id });
     romsStore.currentRom = data;
-    romsStore.update(data);
+    syncCachedRom(data);
   } catch (error) {
     console.error(error);
   }

@@ -3,14 +3,15 @@
 // a single manual file (multi-manual ROMs). The emitter payload picks the
 // scope.
 import { RBtn, RDialog, RIcon } from "@v2/lib";
-import axios from "axios";
 import type { Emitter } from "mitt";
 import { inject, onBeforeUnmount, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import romApi from "@/services/api/rom";
 import storeRoms, { type DetailedRom } from "@/stores/roms";
 import type { Events } from "@/types/emitter";
+import { useRomSync } from "@/v2/composables/useRomSync";
 import { useSnackbar } from "@/v2/composables/useSnackbar";
+import { errorMessage } from "@/v2/utils/errorMessage";
 
 defineOptions({ inheritAttrs: false });
 
@@ -18,21 +19,13 @@ const { t } = useI18n();
 const emitter = inject<Emitter<Events>>("emitter");
 const snackbar = useSnackbar();
 const romsStore = storeRoms();
+const { syncCachedRom } = useRomSync();
 
 const show = ref(false);
 const rom = ref<DetailedRom | null>(null);
 const isPrimary = ref(false);
 const fileId = ref<number | undefined>(undefined);
 const deleting = ref(false);
-
-function errorMessage(err: unknown): string {
-  if (axios.isAxiosError(err)) {
-    const detail = err.response?.data?.detail;
-    if (typeof detail === "string" && detail) return detail;
-    return err.message;
-  }
-  return err instanceof Error ? err.message : String(err);
-}
 
 const handleShow = (payload: Events["showDeleteManualDialog"]) => {
   rom.value = payload.rom;
@@ -48,7 +41,7 @@ async function refreshRom() {
   try {
     const { data } = await romApi.getRom({ romId: rom.value.id });
     romsStore.currentRom = data;
-    romsStore.update(data);
+    syncCachedRom(data);
   } catch (error) {
     console.error(error);
   }

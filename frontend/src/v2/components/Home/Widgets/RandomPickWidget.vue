@@ -3,9 +3,9 @@
 // it on the Home dashboard. Body: cover + name + platform + release
 // year / region, the whole thing a link to the rom. Reroll lives in
 // the card's top-right action slot and reshuffles in place without
-// navigating. Two API calls per pick: one to learn the library total,
-// one to fetch the selected offset; same approach the v1 RandomBtn
-// uses. The pick is intentionally not cached so each mount re-shuffles.
+// navigating. One request per pick: `/roms/random` samples the pick
+// server-side, so it costs the same on any library size. The pick is
+// intentionally not cached so each mount re-shuffles.
 import { RBtn, RChip } from "@v2/lib";
 import { computed, nextTick, onMounted, ref } from "vue";
 import type { ComponentPublicInstance } from "vue";
@@ -34,16 +34,6 @@ const DICE_FACES = [
   "mdi-dice-5-outline",
   "mdi-dice-6-outline",
 ];
-
-// A pick needs a single row, so it opts out of the char index, filter
-// values and rom id index the endpoint returns by default: each of them
-// spans the whole library and dwarfs the row itself.
-const PICK_QUERY = {
-  limit: 1,
-  withCharIndex: false,
-  withFilterValues: false,
-  withRomIdIndex: false,
-} as const;
 
 const pick = ref<SimpleRom | null>(null);
 const loading = ref(false);
@@ -79,9 +69,6 @@ function rollDiceFace() {
   diceFace.value = others[Math.floor(Math.random() * others.length)];
 }
 
-let globalLibraryTotal: number | null = null;
-const totalRoms = ref<number | null>(globalLibraryTotal);
-
 // One attempt at a pick using the dedicated random ROM endpoint.
 async function pickOnce(): Promise<SimpleRom | null> {
   const { data: rom } = await romApi.getRandomRom();
@@ -109,17 +96,17 @@ async function reroll({ notify }: { notify: boolean }) {
 
   try {
     const rom = await pickOnce();
-    if (!rom) throw new Error("random pick came back empty");
     pick.value = rom;
     failed.value = false;
 
-    isBouncing.value = false;
-    await nextTick();
-    isBouncing.value = true;
-    setTimeout(() => {
+    if (rom) {
       isBouncing.value = false;
-    }, 500);
-
+      await nextTick();
+      isBouncing.value = true;
+      setTimeout(() => {
+        isBouncing.value = false;
+      }, 500);
+    }
   } catch {
     failed.value = true;
     if (notify) snackbar.error(t("home.widget-random-pick-error"));
