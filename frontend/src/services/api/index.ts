@@ -115,11 +115,7 @@ api.interceptors.response.use(
     // failure): the session is still valid, so stay on the page and let the
     // caller surface the error. Only refresh the CSRF token when the backend
     // rejected it, so the next attempt uses a fresh one.
-    if (
-      error.response?.status === 403 &&
-      typeof error.response?.data === "string" &&
-      error.response.data.includes("CSRF")
-    ) {
+    if (isCsrfFailure(error)) {
       await refetchCSRFToken().catch(() => {});
     }
 
@@ -174,6 +170,26 @@ api.interceptors.response.use(
 );
 
 export default api;
+
+// `fetch(..., { keepalive: true })` is the only way to reach the backend from a
+// page that is going away, and it does not run the request interceptor above,
+// so the CSRF header that interceptor sets has to be built by hand here.
+export function keepaliveHeaders(): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    "x-csrftoken": Cookies.get("romm_csrftoken") ?? "",
+  };
+}
+
+/** Whether the backend turned a request down over its CSRF token, not its user. */
+export function isCsrfFailure(error: unknown): boolean {
+  const response = axios.isAxiosError(error) ? error.response : undefined;
+  return (
+    response?.status === 403 &&
+    typeof response.data === "string" &&
+    response.data.includes("CSRF")
+  );
+}
 
 export async function refetchCSRFToken() {
   Cookies.remove("romm_csrftoken");

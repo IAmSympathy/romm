@@ -1,13 +1,14 @@
 import os
 import sys
 from enum import Enum
-from typing import Any
+from typing import Any, Final
 
 from redis import Redis
 from redis.asyncio import Redis as AsyncRedis
 from rq import Queue, Worker
 from rq.exceptions import DeserializationError, InvalidJobOperation, NoSuchJobError
 from rq.job import Job, JobStatus
+from rq.worker import WorkerStatus
 
 from config import IS_PYTEST_RUN, REDIS_URL
 from logger.logger import log
@@ -19,11 +20,18 @@ class QueuePrio(Enum):
     LOW = "low"
 
 
+# Scans have a queue and a worker of their own: a library scan runs for hours,
+# and one worker on one queue keeps two of them from ever running at once.
+SCAN_QUEUE_NAME: Final = "scans"
+
 redis_client = Redis.from_url(REDIS_URL)
 
 high_prio_queue = Queue(name=QueuePrio.HIGH.value, connection=redis_client)
 default_queue = Queue(name=QueuePrio.DEFAULT.value, connection=redis_client)
 low_prio_queue = Queue(name=QueuePrio.LOW.value, connection=redis_client)
+scan_queue = Queue(name=SCAN_QUEUE_NAME, connection=redis_client)
+
+ALL_QUEUES: Final = (scan_queue, high_prio_queue, default_queue, low_prio_queue)
 
 
 def __get_sync_cache() -> Redis:
@@ -58,6 +66,20 @@ def __get_async_cache() -> AsyncRedis:
 
 sync_cache = __get_sync_cache()
 async_cache = __get_async_cache()
+
+
+def __get_async_binary_cache() -> AsyncRedis:
+    """A client that leaves values as bytes, since `async_cache` decodes every
+    response as UTF-8 and a zstd frame is not."""
+    if IS_PYTEST_RUN:
+        # Two fakeredis clients get two keyspaces, so the fake is shared. It
+        # does not decode responses, which is what this client wants anyway.
+        return async_cache
+
+    return AsyncRedis.from_url(REDIS_URL)
+
+
+async_binary_cache = __get_async_binary_cache()
 
 
 def get_job_func_name(job: Job, fallback: str = "") -> str:
@@ -140,3 +162,13 @@ def get_worker_current_job(worker: Worker) -> Job | None:
         return worker.get_current_job()
     except NoSuchJobError:
         return None
+
+
+def has_live_worker(queue: Queue) -> bool:
+    """Whether a job enqueued on ``queue`` would be picked up."""
+    # A worker that crashed without announcing it stays registered until its
+    # key TTL lapses, so this can still say yes for a few minutes after a kill.
+    return any(
+        worker.death_date is None and worker.get_state() != WorkerStatus.SUSPENDED
+        for worker in Worker.all(queue=queue)
+    )

@@ -8,6 +8,7 @@ from rq.job import Job
 from watcher import EventType, get_pending_scan_coverage, process_changes
 
 from config import LIBRARY_BASE_PATH
+from config.config_manager import parse_structure_template
 from handler.scan_handler import ScanType
 
 _job_ids = count()
@@ -97,6 +98,13 @@ class TestPendingScanCoverage:
         assert coverage.full_library == 0
         assert coverage.platform_ids == frozenset()
 
+    def test_a_rom_scoped_scan_does_not_cover_the_platform_it_names(self, mocker):
+        # The refresh dialog names the platform alongside the roms, but the scan
+        # only touches those roms, so the platform still needs its rescan.
+        patch_pending_jobs(mocker, make_job(platform_ids=[1], roms_ids=[7]))
+
+        assert get_pending_scan_coverage().platform_ids == frozenset()
+
     def test_ignores_positional_arguments(self, mocker):
         # job.args is what the old dedupe read, and it is always empty.
         job = make_job(platform_ids=[1])
@@ -124,7 +132,7 @@ class TestProcessChanges:
     @pytest.fixture(autouse=True)
     def library_layout(self, mocker):
         config = MagicMock()
-        config.has_structure_path_b = False
+        config.default_structure = parse_structure_template("roms/{platform}/{game}")
         config.EXCLUDED_SINGLE_FILES = []
         config.EXCLUDED_MULTI_FILES = []
         config.EXCLUDED_MULTI_PARTS_FILES = []
@@ -145,7 +153,7 @@ class TestProcessChanges:
 
     @pytest.fixture
     def enqueue_in(self, mocker):
-        return mocker.patch.object(watcher_module.low_prio_queue, "enqueue_in")
+        return mocker.patch.object(watcher_module.scan_queue, "enqueue_in")
 
     def rom_change(self, fs_slug: str = "gba"):
         return (EventType.ADDED, f"{LIBRARY_BASE_PATH}/roms/{fs_slug}/game.gba")
@@ -153,7 +161,7 @@ class TestProcessChanges:
     def platform_dir_change(self, fs_slug: str = "gba"):
         return (EventType.ADDED, f"{LIBRARY_BASE_PATH}/roms/{fs_slug}")
 
-    def test_schedules_a_scan_for_the_changed_platform(
+    def test_schedules_a_quick_scan_for_the_changed_platform(
         self, mocker, platform, enqueue_in
     ):
         patch_pending_jobs(mocker)
@@ -161,7 +169,10 @@ class TestProcessChanges:
         process_changes([self.rom_change()])
 
         enqueue_in.assert_called_once()
-        assert enqueue_in.call_args.kwargs["platform_ids"] == [platform.id]
+        kwargs = enqueue_in.call_args.kwargs
+        assert kwargs["platform_ids"] == [platform.id]
+        assert kwargs["scan_type"] == ScanType.QUICK
+        assert kwargs["meta"]["task_name"] == "Quick Scan"
 
     def test_a_platform_directory_change_schedules_a_full_rescan(
         self, mocker, platform, enqueue_in
@@ -171,7 +182,9 @@ class TestProcessChanges:
         process_changes([self.platform_dir_change()])
 
         enqueue_in.assert_called_once()
-        assert enqueue_in.call_args.kwargs["platform_ids"] == []
+        kwargs = enqueue_in.call_args.kwargs
+        assert kwargs["platform_ids"] == []
+        assert kwargs["scan_type"] == ScanType.UPDATE
 
     def test_a_pending_full_rescan_absorbs_every_change(
         self, mocker, platform, enqueue_in

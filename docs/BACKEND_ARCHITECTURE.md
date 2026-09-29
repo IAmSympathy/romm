@@ -31,7 +31,7 @@ Comprehensive documentation of the RomM backend: a FastAPI-based server powering
 | Property           | Value                            |
 | ------------------ | -------------------------------- |
 | **Framework**      | FastAPI 0.121.1                  |
-| **Language**       | Python 3.13+                     |
+| **Language**       | Python 3.14+                     |
 | **ORM**            | SQLAlchemy 2.0                   |
 | **Migrations**     | Alembic                          |
 | **Databases**      | MariaDB, MySQL, PostgreSQL       |
@@ -329,6 +329,7 @@ backend/
 │   ├── nginx.py               # X-Accel-Redirect responses
 │   ├── router.py              # Custom APIRouter
 │   ├── gamelist_exporter.py   # ES-DE gamelist.xml generation
+│   ├── platform_aliases.py    # Batocera/RetroBat/ES-DE folder name → slug
 │   ├── archive_7zip.py        # 7-Zip archive handling
 │   ├── platforms.py           # Platform management
 │   └── emoji.py               # Emoji utilities
@@ -411,11 +412,18 @@ HTTP Request
 
 ### Supported Databases
 
-| Database      | Driver                | Status    |
-| ------------- | --------------------- | --------- |
-| MariaDB 10.5+ | `mariadb+pymysql`     | Default   |
-| MySQL 8.0+    | `mysql+pymysql`       | Supported |
-| PostgreSQL    | `postgresql+psycopg2` | Supported |
+| Database       | Driver                | Status    |
+| -------------- | --------------------- | --------- |
+| MariaDB 10.11+ | `mariadb+pymysql`     | Default   |
+| MySQL 8.0+     | `mysql+pymysql`       | Supported |
+| PostgreSQL     | `postgresql+psycopg2` | Supported |
+
+MariaDB 10.5 and 10.6 reached upstream end of life in June 2025 and July 2026, so
+10.11 is the oldest LTS still receiving fixes.
+
+CI runs the test suite against MariaDB 12.3 and PostgreSQL 16, and the migration
+suite additionally against MariaDB 10.11, which predates the 11.6 `uca1400`
+collation default. MySQL has no CI coverage.
 
 ### Engine & Session Setup
 
@@ -899,7 +907,7 @@ Facet endpoints (`/artists`, `/albums`, `/genres`, `/years`) return `{value, cou
 | Method | Path     | Scope     | Description                          |
 | ------ | -------- | --------- | ------------------------------------ |
 | GET    | `/roms`  | ROMS_READ | Search metadata across all providers |
-| GET    | `/cover` | ROMS_READ | Search SteamGridDB for cover art     |
+| GET    | `/cover` | ROMS_READ | Search SteamGridDB and Steam covers  |
 
 ### 6.8 Saves (`/api/saves`)
 
@@ -1105,14 +1113,14 @@ The core of RomM. Orchestrates library scanning and metadata enrichment.
 
 **Scan Types:**
 
-| Type            | Behavior                         |
-| --------------- | -------------------------------- |
-| `NEW_PLATFORMS` | Detect new platform folders only |
-| `QUICK`         | Scan new/unscanned ROMs          |
-| `UPDATE`        | Rescan already-identified ROMs   |
-| `UNMATCHED`     | Rescan ROMs without metadata     |
-| `COMPLETE`      | Full rescan of everything        |
-| `HASHES`        | Recalculate all file hashes      |
+| Type            | Behavior                                                                                  |
+| --------------- | ----------------------------------------------------------------------------------------- |
+| `NEW_PLATFORMS` | Detect new platform folders only                                                          |
+| `QUICK`         | Scan new ROMs and reconcile the files of existing ones, hashing only new or changed files |
+| `UPDATE`        | Rescan already-identified ROMs                                                            |
+| `UNMATCHED`     | Rescan ROMs without metadata                                                              |
+| `COMPLETE`      | Full rescan of everything                                                                 |
+| `HASHES`        | Recalculate all file hashes                                                               |
 
 **Scan Flow:**
 
@@ -1312,7 +1320,7 @@ Each adapter wraps an external API with authentication, retry logic, and type sa
 | ------------- | -------------------- | ------------------------------------------------- |
 | LaunchBox     | `launchbox_handler/` | Local XML database + remote API, platform mapping |
 | HowLongToBeat | `hltb_handler`       | Game playtime estimates                           |
-| Steam         | `steam_handler`      | Storefront metadata for win/linux/mac only        |
+| Steam         | `steam_handler`      | Storefront metadata (win/linux/mac) and cover art |
 | Hasheous      | `hasheous_handler`   | Hash-based ROM identification                     |
 | TheGamesDB    | `tgdb_handler`       | Alternative game metadata                         |
 | Flashpoint    | `flashpoint_handler` | Browser game archive database                     |
@@ -1375,11 +1383,12 @@ Redis-backed for horizontal scaling across multiple server instances.
 
 **Priority Queues:**
 
-| Queue             | Use Case                    |
-| ----------------- | --------------------------- |
-| `high_prio_queue` | Urgent operations           |
-| `default_queue`   | Standard background work    |
-| `low_prio_queue`  | Long-running scans, cleanup |
+| Queue             | Use Case                                       |
+| ----------------- | ---------------------------------------------- |
+| `high_prio_queue` | Urgent operations                              |
+| `default_queue`   | Standard background work                       |
+| `low_prio_queue`  | Cleanups, conversions, metadata refreshes      |
+| `scan_queue`      | Library scans, consumed by a worker of its own |
 
 ### Scheduled Tasks
 
@@ -1388,6 +1397,10 @@ Declared in `tasks/registry.py` and registered with RQ's cron scheduler by
 registered only when it is enabled and has a cron string, so turning one off is
 a restart rather than an unschedule. Delayed jobs, which is how the filesystem
 watcher defers a rescan, are released by the worker itself (`--with-scheduler`).
+
+Everything is registered on `low_prio_queue`. A scan is registered as a dispatch
+job that enqueues the real scan onto `scan_queue`, because cron can attach no
+failure callback and a scan needs one to report a worker that died mid-scan.
 
 Toggled via environment variables:
 
@@ -1403,7 +1416,7 @@ Toggled via environment variables:
 
 ### Manual Tasks
 
-Triggered via `POST /api/tasks/run/{task_name}`:
+Triggered via `POST /api/tasks/run/{task_name}`, which enqueues on `low_prio_queue` and answers 503 when no live worker is listening on it:
 
 | Task                   | Description                                   |
 | ---------------------- | --------------------------------------------- |
@@ -1539,14 +1552,16 @@ Falls back to `FakeRedis` in test mode.
 
 #### Database
 
-| Variable         | Default   | Description                         |
-| ---------------- | --------- | ----------------------------------- |
-| `ROMM_DB_DRIVER` | `mariadb` | `mariadb`, `mysql`, or `postgresql` |
-| `DB_HOST`        |           | Database host                       |
-| `DB_PORT`        | `3306`    | Database port                       |
-| `DB_USER`        |           | Database user                       |
-| `DB_PASSWD`      |           | Database password                   |
-| `DB_NAME`        | `romm`    | Database name                       |
+| Variable                  | Default   | Description                                                        |
+| ------------------------- | --------- | ------------------------------------------------------------------ |
+| `ROMM_DB_DRIVER`          | `mariadb` | `mariadb`, `mysql`, or `postgresql`                                |
+| `DB_HOST`                 |           | Database host                                                      |
+| `DB_PORT`                 | `3306`    | Database port                                                      |
+| `DB_USER`                 |           | Database user                                                      |
+| `DB_PASSWD`               |           | Database password                                                  |
+| `DB_NAME`                 | `romm`    | Database name                                                      |
+| `DB_QUERY_JSON`           |           | Extra connection parameters, as JSON                               |
+| `DB_POOL_RECYCLE_SECONDS` | `300`     | Retire a pooled connection after this long (`-1` to never recycle) |
 
 #### Redis
 
@@ -1615,13 +1630,14 @@ Falls back to `FakeRedis` in test mode.
 | `DISABLE_EMULATOR_JS`    | `false` | Hide EmulatorJS player   |
 | `DISABLE_RUFFLE_RS`      | `false` | Hide Ruffle Flash player |
 | `DISABLE_JSDOS`          | `false` | Hide js-dos player       |
+| `DISABLE_PICO8`          | `false` | Hide PICO-8 player       |
 
 #### Task Scheduling
 
 | Variable                               | Default     | Description                     |
 | -------------------------------------- | ----------- | ------------------------------- |
 | `SCAN_TIMEOUT`                         | `14400`     | 4-hour scan timeout             |
-| `SCAN_WORKERS`                         | `1`         | Concurrent scan workers         |
+| `SCAN_WORKERS`                         | `4`         | Concurrent scan workers         |
 | `TASK_TIMEOUT`                         |             | RQ job timeout for manual tasks |
 | `TASK_RESULT_TTL`                      |             | How long to keep job results    |
 | `ENABLE_SCHEDULED_RESCAN`              | `false`     | Auto library rescan             |
@@ -1655,15 +1671,17 @@ exclude:
       names: ["__MACOSX"]
 
 filesystem:
-  roms_folder: "roms" # Subfolder name for ROMs
-  firmware_folder: "bios" # Subfolder name for BIOS
+  structure: # Library layout; `{platform}` is the platform folder, `{game}` where a game begins
+    default: "roms/{platform}/{game}"
+    firmware: "bios/{platform}"
+    ps3: "roms/{platform}/{category}/{game}" # Per-platform override, by fs_slug
   skip_hash_calculation: false
   skip_title_id_extraction: false # Skip sigil title ID extraction
   embed_switch_title_ids: false # Rename Switch ROMs to embed their title ID
 
 system:
-  platforms:
-    snes: "snes" # fs_slug → canonical slug mappings
+  platforms: # fs_slug → slug overrides (Batocera/RetroBat/ES-DE folder names resolve automatically)
+    snes: "snes"
   versions:
     snes: "pal" # Platform version overrides
 
@@ -1678,6 +1696,8 @@ scan:
 
 emulatorjs:
   debug: false
+  default_cores:
+    nds: desmume # platform slug → core preselected in the player
   netplay:
     enabled: false
     ice_servers:

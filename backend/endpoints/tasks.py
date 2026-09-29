@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
-from typing import Any, Final
+from typing import Any, Final, Mapping, cast
 
-from fastapi import Body, HTTPException, Request
+from fastapi import Body, HTTPException, Request, status
 from rq import Worker
 from rq.exceptions import NoSuchJobError
 from rq.job import Job, JobStatus
@@ -10,9 +10,11 @@ from rq.registry import FailedJobRegistry, FinishedJobRegistry
 from config import ENABLE_RESCAN_ON_FILESYSTEM_CHANGE, RESCAN_ON_FILESYSTEM_CHANGE_DELAY
 from decorators.auth import protected_route
 from endpoints.responses import (
+    CleanupStats,
     CleanupTaskStatusResponse,
     ConversionTaskStatusResponse,
     GenericTaskStatusResponse,
+    ScanStats,
     ScanTaskStatusResponse,
     SyncTaskStatusResponse,
     TaskExecutionResponse,
@@ -23,10 +25,10 @@ from endpoints.responses import (
 from endpoints.responses.tasks import GroupedTasksDict, TaskInfo
 from handler.auth.constants import Scope
 from handler.redis_handler import (
-    default_queue,
+    ALL_QUEUES,
     get_job_func_name,
     get_worker_current_job,
-    high_prio_queue,
+    has_live_worker,
     low_prio_queue,
     redis_client,
 )
@@ -39,7 +41,6 @@ router = APIRouter(
     tags=["tasks"],
 )
 
-
 # Scheduled tasks an admin can see and trigger. The rest of the catalog runs on
 # its schedule without being surfaced.
 VISIBLE_SCHEDULED_TASKS: Final[dict[str, Task]] = {
@@ -48,6 +49,7 @@ VISIBLE_SCHEDULED_TASKS: Final[dict[str, Task]] = {
         "scan_library",
         "update_launchbox_metadata",
         "update_switch_titledb",
+        "build_recommendations",
         "convert_images_to_webp",
         "cleanup_zip_cache",
         "cleanup_orphaned_resources",
@@ -70,12 +72,43 @@ def _build_task_info(name: str, task: Task) -> TaskInfo:
     )
 
 
+# Read off the annotations so a counter added there is filled without a second edit.
+_EMPTY_SCAN_STATS: Final[ScanStats] = cast(
+    ScanStats, dict.fromkeys(ScanStats.__annotations__, 0)
+)
+
+
+def _fill_scan_stats(stats: Mapping[str, Any] | None) -> ScanStats | None:
+    """Zero the counters an older release's stored stats are missing.
+
+    A job's meta in Redis outlives the release that wrote it.
+    """
+    if stats is None:
+        return None
+
+    return cast(ScanStats, {**_EMPTY_SCAN_STATS, **stats})
+
+
+def _fill_cleanup_stats(stats: Mapping[str, Any] | None) -> CleanupStats | None:
+    """Widen the single platform a 5.2.0 job's stored stats named."""
+    # Job meta lives for TASK_RESULT_TTL, so this only ever meets jobs that
+    # finished just before an upgrade.
+    if stats is None or "platform_id" not in stats:
+        return cast(CleanupStats | None, stats)
+
+    legacy = {**stats}
+    platform_id = legacy.pop("platform_id")
+    legacy["platform_ids"] = [platform_id] if platform_id is not None else None
+    return cast(CleanupStats, legacy)
+
+
 def _build_task_status_response(
     job: Job,
 ) -> TaskStatusResponse:
     job_meta = job.get_meta()
     task_type = job_meta.get("task_type")
     task_name = job_meta.get("task_name") or get_job_func_name(job)
+    task_key = job_meta.get("task_key") or job.kwargs.get("name")
 
     # Convert datetime objects to ISO format strings
     created_at = job.created_at.isoformat() if job.created_at else None
@@ -84,6 +117,7 @@ def _build_task_status_response(
     enqueued_at = job.enqueued_at.isoformat() if job.enqueued_at else None
 
     common_data = {
+        "task_key": task_key,
         "task_name": task_name,
         "task_id": job.id,
         "status": job.get_status(),
@@ -104,7 +138,7 @@ def _build_task_status_response(
         case TaskType.SCAN:
             return ScanTaskStatusResponse(
                 task_type=TaskType.SCAN,
-                meta={"scan_stats": job_meta.get("scan_stats")},
+                meta={"scan_stats": _fill_scan_stats(job_meta.get("scan_stats"))},
                 **common_data,  # trunk-ignore(mypy/typeddict-item)
             )
         case TaskType.CONVERSION:
@@ -122,7 +156,9 @@ def _build_task_status_response(
         case TaskType.CLEANUP:
             return CleanupTaskStatusResponse(
                 task_type=TaskType.CLEANUP,
-                meta={"cleanup_stats": job_meta.get("cleanup_stats")},
+                meta={
+                    "cleanup_stats": _fill_cleanup_stats(job_meta.get("cleanup_stats"))
+                },
                 **common_data,  # trunk-ignore(mypy/typeddict-item)
             )
         case TaskType.SYNC:
@@ -203,42 +239,18 @@ async def get_tasks_status(request: Request) -> list[TaskStatusResponse]:
             all_tasks.append(_build_task_status_response(current_job))
 
     # Get all jobs from the queues (including completed ones)
-    low_prio_jobs = low_prio_queue.get_jobs()
-    default_prio_jobs = default_queue.get_jobs()
-    high_prio_jobs = high_prio_queue.get_jobs()
+    for queue in ALL_QUEUES:
+        for job in queue.get_jobs():
+            all_tasks.append(_build_task_status_response(job))
 
-    for job in low_prio_jobs + default_prio_jobs + high_prio_jobs:
-        all_tasks.append(_build_task_status_response(job))
-
-    # Get finished jobs from all queues
-    finished_registries = [
-        FinishedJobRegistry(queue=low_prio_queue),
-        FinishedJobRegistry(queue=default_queue),
-        FinishedJobRegistry(queue=high_prio_queue),
+    # Process finished and failed jobs
+    registries = [
+        registry_class(queue=queue)
+        for registry_class in (FinishedJobRegistry, FailedJobRegistry)
+        for queue in ALL_QUEUES
     ]
 
-    failed_registries = [
-        FailedJobRegistry(queue=low_prio_queue),
-        FailedJobRegistry(queue=default_queue),
-        FailedJobRegistry(queue=high_prio_queue),
-    ]
-
-    # Process finished jobs
-    for registry in finished_registries:
-        for job_id in registry.get_job_ids():
-            try:
-                job = Job.fetch(job_id, connection=redis_client)
-            except NoSuchJobError:
-                registry.remove(job_id)
-                continue
-            all_tasks.append(
-                _build_task_status_response(
-                    job,
-                )
-            )
-
-    # Process failed jobs
-    for registry in failed_registries:
+    for registry in registries:
         for job_id in registry.get_job_ids():
             try:
                 job = Job.fetch(job_id, connection=redis_client)
@@ -266,7 +278,7 @@ async def get_task_by_id(request: Request, task_id: str) -> TaskStatusResponse:
         TaskStatusResponse: Task status information
     """
     try:
-        job = Job.fetch(task_id, connection=low_prio_queue.connection)
+        job = Job.fetch(task_id, connection=redis_client)
     except Exception as e:
         raise HTTPException(
             status_code=404,
@@ -307,11 +319,19 @@ async def run_single_task(
             detail=f"Task '{task_name}' cannot be run",
         )
 
+    # Without a worker the job would sit queued while the UI waits on it.
+    if not has_live_worker(low_prio_queue):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No task worker is listening, so the task cannot be queued",
+        )
+
     # The caller's arguments are nested rather than spread, so a body cannot
     # name a different task than the one this route just authorized.
-    job = enqueue_task(task_name, task_kwargs=task_kwargs or {})
+    job = enqueue_task(task_name, queue=low_prio_queue, task_kwargs=task_kwargs or {})
 
     return {
+        "task_key": task_name,
         "task_name": task_instance.title,
         "task_id": job.id,
         "status": job.get_status() or JobStatus.QUEUED,

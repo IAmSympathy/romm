@@ -19,6 +19,23 @@ elif [[ ! -e /app/frontend/assets/romm/resources ]]; then
 	ln -s "${ROMM_BASE_PATH}/resources" "/app/frontend/assets/romm/resources"
 fi
 
+# The ./frontend bind mount hides whatever the build wrote under /app/frontend,
+# so link the image's emulator runtimes into the tree the dev server serves.
+if [[ -n ${EMULATOR_ASSETS_DIR-} && -d ${EMULATOR_ASSETS_DIR} ]]; then
+	for runtime_dir in "${EMULATOR_ASSETS_DIR}"/*; do
+		target="/app/frontend/assets/$(basename "${runtime_dir}")"
+		mkdir -p "${target}"
+		for entry in "${runtime_dir}"/*; do
+			link="${target}/$(basename "${entry}")"
+			# Never replace checked-in art that shares a name with a runtime file.
+			if [[ -e ${link} && ! -L ${link} ]]; then
+				continue
+			fi
+			ln -sfn "${entry}" "${link}"
+		done
+	done
+fi
+
 # Define a signal handler to propagate termination signals
 function handle_termination() {
 	echo "Terminating child processes..."
@@ -71,22 +88,33 @@ PYTHONPATH="/app/backend:${PYTHONPATH-}" \
 	--logging-level "${LOGLEVEL:-INFO}" \
 	tasks.cron_config &
 
-echo "Starting RQ worker..."
 # Set PYTHONPATH so RQ can find the tasks module.
 # Use a worker class that drops the noisy per-sweep "cleaning registries for
 # queue" log line. The maintenance interval keeps its default (~10 min) so
 # orphaned STARTED jobs and stale workers are still pruned promptly.
 # --with-scheduler releases delayed jobs, which is how the watcher's rescans
 # wait out their delay.
-PYTHONPATH="/app/backend:${PYTHONPATH-}" \
-	RQ_REDIS_URL="${REDIS_URL}" \
-	rq worker \
-	--path /app/backend \
-	--worker-class handler.rq_worker.RomMWorker \
-	--pid /tmp/rq_worker.pid \
-	--logging_level "${LOGLEVEL:-INFO}" \
-	--with-scheduler \
-	high default low &
+start_rq_worker() {
+	local name="$1"
+	shift
+
+	PYTHONPATH="/app/backend:${PYTHONPATH-}" \
+		RQ_REDIS_URL="${REDIS_URL}" \
+		rq worker \
+		--path /app/backend \
+		--worker-class handler.rq_worker.RomMWorker \
+		--pid "/tmp/${name}.pid" \
+		--logging_level "${LOGLEVEL:-INFO}" \
+		--with-scheduler \
+		"$@" &
+}
+
+echo "Starting RQ worker..."
+start_rq_worker rq_worker high default low
+
+# Scans get a worker of their own, see SCAN_QUEUE_NAME.
+echo "Starting RQ scan worker..."
+start_rq_worker rq_scan_worker scans
 
 echo "Starting watcher..."
 watchfiles \

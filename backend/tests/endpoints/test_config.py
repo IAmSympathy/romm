@@ -3,9 +3,11 @@ from unittest.mock import patch
 from fastapi import status
 
 from config.config_manager import (
-    DEFAULT_EXCLUDED_DIRS,
     DEFAULT_EXCLUDED_EXTENSIONS,
     DEFAULT_EXCLUDED_FILES,
+    DEFAULT_EXCLUDED_MULTI_FILE_DIRS,
+    DEFAULT_EXCLUDED_PLATFORM_DIRS,
+    ExclusionType,
 )
 from config.config_manager import config_manager as cm
 
@@ -15,17 +17,23 @@ def test_config(client):
     assert response.status_code == status.HTTP_200_OK
 
     config = response.json()
-    assert config.get("EXCLUDED_PLATFORMS") == sorted(DEFAULT_EXCLUDED_DIRS)
+    assert config.get("EXCLUDED_PLATFORMS") == sorted(DEFAULT_EXCLUDED_PLATFORM_DIRS)
     assert config.get("EXCLUDED_SINGLE_EXT") == sorted(
         e.lower() for e in DEFAULT_EXCLUDED_EXTENSIONS
     )
     assert config.get("EXCLUDED_SINGLE_FILES") == sorted(DEFAULT_EXCLUDED_FILES)
-    assert config.get("EXCLUDED_MULTI_FILES") == sorted(DEFAULT_EXCLUDED_DIRS)
+    assert config.get("EXCLUDED_MULTI_FILES") == sorted(
+        DEFAULT_EXCLUDED_MULTI_FILE_DIRS
+    )
     assert config.get("EXCLUDED_MULTI_PARTS_EXT") == sorted(
         e.lower() for e in DEFAULT_EXCLUDED_EXTENSIONS
     )
     assert config.get("EXCLUDED_MULTI_PARTS_FILES") == sorted(DEFAULT_EXCLUDED_FILES)
+    assert config.get("DEFAULT_EXCLUDED_MULTI_FILE_DIRS") == list(
+        DEFAULT_EXCLUDED_MULTI_FILE_DIRS
+    )
     assert config.get("PLATFORMS_BINDING") == {}
+    assert config.get("EJS_DEFAULT_CORES") == {}
     assert not config.get("SKIP_HASH_CALCULATION")
     assert config.get("GAMELIST_MEDIA_THUMBNAIL") == "box2d"
     assert config.get("GAMELIST_MEDIA_IMAGE") == "screenshot"
@@ -84,11 +92,40 @@ def test_add_exclusion_payload_shape(client, access_token: str):
         response = client.post(
             "/api/config/exclude",
             headers={"Authorization": f"Bearer {access_token}"},
-            json={"exclusion_type": "single_files", "exclusion_value": "README.txt"},
+            json={
+                "exclusion_type": "EXCLUDED_SINGLE_FILES",
+                "exclusion_value": "README.txt",
+            },
         )
 
     assert response.status_code == status.HTTP_200_OK
-    add_exclusion.assert_called_once_with("single_files", "README.txt")
+    add_exclusion.assert_called_once_with(
+        ExclusionType.EXCLUDED_SINGLE_FILES, "README.txt"
+    )
+
+
+def test_add_exclusion_rejects_unknown_type(client, access_token: str):
+    """An unknown type used to reach `Config.__getattribute__` and 500."""
+    with patch.object(cm, "add_exclusion") as add_exclusion:
+        response = client.post(
+            "/api/config/exclude",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"exclusion_type": "platforms", "exclusion_value": "README.txt"},
+        )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    add_exclusion.assert_not_called()
+
+
+def test_delete_exclusion_rejects_unknown_type(client, access_token: str):
+    with patch.object(cm, "remove_exclusion") as remove_exclusion:
+        response = client.delete(
+            "/api/config/exclude/platforms/README.txt",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    remove_exclusion.assert_not_called()
 
 
 def _scan_payload(**overrides):
@@ -150,7 +187,7 @@ def test_update_scan_settings_rejects_unknown_source(client, access_token: str):
             json=_scan_payload(metadata_priority=["igdb", "not-a-source"]),
         )
 
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
     update_scan_settings.assert_not_called()
 
 
@@ -165,7 +202,7 @@ def test_update_scan_settings_rejects_invalid_gamelist_thumbnail(
             json=_scan_payload(gamelist_thumbnail="screenshot"),
         )
 
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
     update_scan_settings.assert_not_called()
 
 

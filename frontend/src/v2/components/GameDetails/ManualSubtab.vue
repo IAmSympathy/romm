@@ -12,7 +12,7 @@ import type { Emitter } from "mitt";
 import { computed, defineAsyncComponent, inject, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import romApi from "@/services/api/rom";
-import storeRoms, { type DetailedRom } from "@/stores/roms";
+import type { DetailedRom } from "@/stores/roms";
 import type { Events } from "@/types/emitter";
 import { FRONTEND_RESOURCES_PATH } from "@/utils";
 import { useCan } from "@/v2/composables/useCan";
@@ -30,11 +30,15 @@ const TextViewer = defineAsyncComponent(
   () => import("@/v2/components/GameDetails/TextViewer.vue"),
 );
 
-const props = defineProps<{ rom: DetailedRom }>();
+const props = defineProps<{
+  rom: DetailedRom;
+  /** Drop the header Upload button when the parent renders it elsewhere
+   *  (through the exposed `openUpload`). */
+  hideUpload?: boolean;
+}>();
 const emitter = inject<Emitter<Events>>("emitter");
 const snackbar = useSnackbar();
-const romsStore = storeRoms();
-const { syncCachedRom } = useRomSync();
+const { refetchRom } = useRomSync();
 const { t } = useI18n();
 
 // Every manual endpoint (upload / redownload / delete) gates on the ROM write
@@ -47,6 +51,9 @@ type ManualEntry = {
   label: string;
   url: string;
   isPrimary: boolean;
+  /** Backing rom file, absent for the scraped manual (a resource, not a file),
+   *  which is what reading progress is keyed on. */
+  fileId: number | null;
   // Manuals can be PDF, Markdown, or plain text; the viewer is picked by
   // extension.
   kind: "pdf" | "md" | "text";
@@ -67,6 +74,7 @@ const manualEntries = computed<ManualEntry[]>(() => {
       label: t("rom.scraped-manual"),
       url: `${FRONTEND_RESOURCES_PATH}/${props.rom.path_manual}?v=${cacheBust}`,
       isPrimary: true,
+      fileId: null,
       kind: kindFor(props.rom.path_manual),
     });
   }
@@ -79,6 +87,7 @@ const manualEntries = computed<ManualEntry[]>(() => {
           file.file_name,
         )}?v=${cacheBust}`,
         isPrimary: false,
+        fileId: file.id,
         kind: kindFor(file.file_name),
       });
     }
@@ -121,17 +130,16 @@ const manualItems = computed(() =>
 // The filled viewer is wrapped in an overlay RDropzone (drag files onto the
 // manual to add another); the header's Upload button opens its picker.
 const manualDz = ref<InstanceType<typeof RDropzone> | null>(null);
-const redownloadingManual = ref(false);
+const canUploadMore = computed(
+  () => manualEntries.value.length > 0 && canEdit.value,
+);
 
-async function refreshRom() {
-  try {
-    const { data } = await romApi.getRom({ romId: props.rom.id });
-    romsStore.currentRom = data;
-    syncCachedRom(data);
-  } catch (error) {
-    console.error(error);
-  }
+function openUpload() {
+  manualDz.value?.open();
 }
+
+defineExpose({ canUpload: canUploadMore, openUpload });
+const redownloadingManual = ref(false);
 
 function handleManualFiles(files: File[]) {
   if (files.length === 0) return;
@@ -143,7 +151,7 @@ async function redownloadManual() {
   redownloadingManual.value = true;
   try {
     await romApi.redownloadManual({ romId: props.rom.id });
-    await refreshRom();
+    await refetchRom(props.rom.id);
     snackbar.success(t("rom.manual-redownloaded"), {
       icon: "mdi-check-bold",
     });
@@ -165,9 +173,7 @@ function requestDeleteManual() {
   emitter?.emit("showDeleteManualDialog", {
     rom: props.rom,
     isPrimary: entry.isPrimary,
-    fileId: entry.isPrimary
-      ? undefined
-      : Number(entry.id.replace(/^file-/, "")),
+    fileId: entry.fileId ?? undefined,
   });
 }
 </script>
@@ -175,10 +181,13 @@ function requestDeleteManual() {
 <template>
   <div class="r-v2-manual">
     <!-- The subtab label in the sidebar already names the section, so the
-         header skips a redundant title and just hosts the entry selector
-         (when multiple). -->
-    <header v-if="manualEntries.length > 1" class="r-v2-manual__head">
+         header skips a redundant title. -->
+    <header
+      v-if="manualEntries.length > 1 || (canUploadMore && !hideUpload)"
+      class="r-v2-manual__head"
+    >
       <RSelect
+        v-if="manualEntries.length > 1"
         v-model="selectedManualId"
         :items="manualItems"
         density="compact"
@@ -186,6 +195,16 @@ function requestDeleteManual() {
         hide-details
         class="r-v2-manual__select"
       />
+      <RBtn
+        v-if="canUploadMore && !hideUpload"
+        variant="outlined"
+        size="small"
+        prepend-icon="mdi-cloud-upload-outline"
+        class="r-v2-manual__upload"
+        @click="openUpload"
+      >
+        {{ t("common.upload") }}
+      </RBtn>
     </header>
 
     <REmptyState
@@ -233,6 +252,8 @@ function requestDeleteManual() {
           v-if="selectedManual.kind === 'md'"
           :key="`${selectedManual.id}-${rom.updated_at}-md`"
           :url="selectedManual.url"
+          :rom-id="rom.id"
+          :file-id="selectedManual.fileId ?? undefined"
           :deletable="canEdit"
           :redownloadable="canEdit && !!rom.url_manual"
           :redownloading="redownloadingManual"
@@ -243,13 +264,17 @@ function requestDeleteManual() {
           v-else-if="selectedManual.kind === 'text'"
           :key="`${selectedManual.id}-${rom.updated_at}-txt`"
           :url="selectedManual.url"
-          deletable
+          :rom-id="rom.id"
+          :file-id="selectedManual.fileId ?? undefined"
+          :deletable="canEdit"
           @delete="requestDeleteManual"
         />
         <PdfViewer
           v-else
           :key="`${selectedManual.id}-${rom.updated_at}-pdf`"
           :pdf-url="selectedManual.url"
+          :rom-id="rom.id"
+          :file-id="selectedManual.fileId ?? undefined"
           :deletable="canEdit"
           :redownloadable="canEdit && !!rom.url_manual"
           :redownloading="redownloadingManual"
@@ -258,18 +283,6 @@ function requestDeleteManual() {
         />
       </div>
     </RDropzone>
-
-    <div v-if="manualEntries.length > 0 && canEdit">
-      <RBtn
-        block
-        variant="outlined"
-        size="small"
-        prepend-icon="mdi-cloud-upload-outline"
-        @click="manualDz?.open()"
-      >
-        {{ t("common.upload") }}
-      </RBtn>
-    </div>
   </div>
 </template>
 
@@ -300,6 +313,10 @@ function requestDeleteManual() {
   max-width: 360px;
   min-width: 200px;
   flex-shrink: 1;
+}
+
+.r-v2-manual__upload {
+  margin-left: auto;
 }
 
 /* Overlay-mode RDropzone wrapping the viewer must fill the panel height so

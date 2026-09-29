@@ -6,17 +6,18 @@
 // settings reorder list pick it up automatically.
 import type { Component } from "vue";
 import ActiveSessionsWidget from "./ActiveSessionsWidget.vue";
+import AnniversaryWidget from "./AnniversaryWidget.vue";
 import LibraryStatsWidget from "./LibraryStatsWidget.vue";
 import RandomPickWidget from "./RandomPickWidget.vue";
 
-export type WidgetId = "randomPick" | "activeSessions" | "libraryStats";
+export type WidgetId = "randomPick" | "activeSessions" | "anniversaries" | "libraryStats";
 
 export interface WidgetDef {
   id: WidgetId;
   /** The component to render. */
   component: Component;
   /** Key in `useUISettings` that controls visibility. */
-  enabledKey: "widgetRandomPick" | "widgetActiveSessions" | "widgetLibraryStats";
+  enabledKey: "widgetRandomPick" | "widgetActiveSessions" | "widgetAnniversaries" | "widgetLibraryStats";
   /** i18n key for the user-facing label (settings reorder list). */
   labelKey: string;
   /** Optional MDI icon used in the reorder list. */
@@ -37,6 +38,13 @@ export const WIDGETS: readonly WidgetDef[] = [
     enabledKey: "widgetActiveSessions",
     labelKey: "settings.widget-active-sessions",
     icon: "mdi-controller",
+  },
+  {
+    id: "anniversaries",
+    component: AnniversaryWidget,
+    enabledKey: "widgetAnniversaries",
+    labelKey: "settings.widget-anniversaries",
+    icon: "mdi-calendar-star",
   },
   {
     id: "libraryStats",
