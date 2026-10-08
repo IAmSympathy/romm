@@ -50,7 +50,7 @@ def frame_durations(
             if on_frame:
                 on_frame(frame)
             durations.append(frame.info.get("duration", 0))
-    except OSError, SyntaxError, ValueError, Image.DecompressionBombError:
+    except (OSError, SyntaxError, ValueError, Image.DecompressionBombError):
         return None
     finally:
         img.seek(0)

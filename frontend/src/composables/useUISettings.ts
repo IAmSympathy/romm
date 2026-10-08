@@ -87,7 +87,7 @@ export const UI_SETTINGS_KEYS = {
     key: "settings.enableExperimentalCache",
     default: false,
   },
-  boxartStyle: { key: "settings.boxartStyle", default: "cover_path" },
+  boxartStyle: { key: "settings.boxartStyle", default: "miximage_v2_path" },
   // Per-page boxart styles
   boxartStyleDetails: {
     key: "settings.boxartStyleDetails",

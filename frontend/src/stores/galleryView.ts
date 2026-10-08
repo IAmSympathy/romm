@@ -5,7 +5,7 @@ import type { BoxartStyleOption } from "@/components/Settings/UserInterface/Inte
 const currentViewStorage = useLocalStorage("ui.currentView", 0);
 const boxartStyleStorage = useLocalStorage<BoxartStyleOption>(
   "settings.boxartStyle",
-  "cover_path",
+  "miximage_v2_path",
 );
 
 const defaultGalleryState = {

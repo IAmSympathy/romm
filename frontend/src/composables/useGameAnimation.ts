@@ -56,7 +56,7 @@ export function useGameAnimation({
   const romsStore = storeRoms();
   const _boxartStyle = useLocalStorage<BoxartStyleOption>(
     "settings.boxartStyle",
-    "cover_path",
+    "miximage_v2_path",
   );
   const disableAnimations = useLocalStorage(
     "settings.disableAnimations",
