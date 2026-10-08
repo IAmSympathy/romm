@@ -190,9 +190,17 @@ useIntervalFn(() => {
 </script>
 
 <template>
-  <WidgetCard :title="t('home.widget-anniversaries')" :loading="loading">
+  <WidgetCard
+    :title="t('home.widget-anniversaries')"
+    width="320px"
+    :loading="loading"
+    class="r-v2-widget-anniv"
+  >
     <template #action>
       <div class="r-v2-widget-anniv__nav">
+        <span v-if="total > 1" class="r-v2-widget-anniv__counter">
+          {{ index + 1 }} / {{ total }}
+        </span>
         <RBtn
           ref="prevBtn"
           variant="text"
@@ -201,6 +209,7 @@ useIntervalFn(() => {
           :disabled="atStart"
           :tooltip="t('home.widget-anniversaries-prev')"
           :aria-label="t('home.widget-anniversaries-prev')"
+          class="r-v2-widget-anniv__nav-btn"
           @click="step(-1)"
         />
         <RBtn
@@ -212,6 +221,7 @@ useIntervalFn(() => {
           :loading="paging"
           :tooltip="t('home.widget-anniversaries-next')"
           :aria-label="t('home.widget-anniversaries-next')"
+          class="r-v2-widget-anniv__nav-btn"
           @click="step(1)"
         />
       </div>
@@ -221,12 +231,23 @@ useIntervalFn(() => {
       class="r-v2-widget-anniv__body"
       :to="{ name: ROUTES.ROM, params: { rom: current.id } }"
     >
-      <GameCover
-        :rom="current"
-        :title="title"
-        :identified="current.is_identified"
-        class="r-v2-widget-anniv__cover"
-      />
+      <!-- Celebration badge: Years elapsed -->
+      <div v-if="yearsAgo" class="r-v2-widget-anniv__badge">
+        <span class="r-v2-widget-anniv__sparkle">✨</span>
+        <span>{{ t("home.widget-anniversaries-years", { count: yearsAgo }) }}</span>
+      </div>
+
+      <!-- Main Showcase Cover -->
+      <div class="r-v2-widget-anniv__cover-wrapper">
+        <GameCover
+          :rom="current"
+          :title="title"
+          :identified="current.is_identified"
+          class="r-v2-widget-anniv__cover"
+        />
+      </div>
+
+      <!-- Info Area -->
       <div class="r-v2-widget-anniv__info">
         <div class="r-v2-widget-anniv__name">{{ title }}</div>
         <div class="r-v2-widget-anniv__platform">
@@ -239,79 +260,148 @@ useIntervalFn(() => {
             {{ current.platform_display_name }}
           </span>
         </div>
-        <div class="r-v2-widget-anniv__meta">
-          <span v-if="yearsAgo">
-            {{ t("home.widget-anniversaries-years", { count: yearsAgo }) }}
-          </span>
-          <span v-if="total > 1" class="r-v2-widget-anniv__position">
-            {{ index + 1 }} / {{ total }}
-          </span>
-        </div>
       </div>
     </router-link>
     <div v-else class="r-v2-widget-anniv__empty">
-      {{ placeholder }}
+      <span class="r-v2-widget-anniv__empty-icon">🎂</span>
+      <span>{{ placeholder }}</span>
     </div>
   </WidgetCard>
 </template>
 
 <style scoped>
+/* ── Anniversary Header Action & Navigation ─────────────────────── */
 .r-v2-widget-anniv__nav {
   display: flex;
   align-items: center;
-  gap: 2px;
-}
-
-.r-v2-widget-anniv__body {
-  display: flex;
-  gap: 10px;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  color: inherit;
-  text-decoration: none;
-  border-radius: var(--r-radius-sm);
-}
-
-/* Fixed height, natural width, so the cover renders at its image's true aspect
-   (GameCover measures it), matching the gallery. The descendant selector
-   outweighs GameCover's base `width: 100%` so width can follow the ratio. */
-.r-v2-widget-anniv__body .r-v2-widget-anniv__cover {
-  height: 70px;
-  width: auto;
-  flex-shrink: 0;
-  --r-cover-radius: var(--r-radius-sm);
-}
-
-.r-v2-widget-anniv__info {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
   gap: 4px;
 }
 
+.r-v2-widget-anniv__counter {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fbbf24;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  margin-right: 2px;
+}
+
+.r-v2-widget-anniv__nav-btn {
+  color: #cbd5e1;
+  transition: color var(--r-motion-fast) ease;
+}
+
+.r-v2-widget-anniv__nav-btn:hover:not(:disabled) {
+  color: #fbbf24;
+}
+
+/* ── Card Body & Vertical Fill ──────────────────────────────────── */
+.r-v2-widget-anniv__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 100%;
+  margin-top: 2px;
+  overflow: visible;
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--r-radius-sm);
+  position: relative;
+}
+
+/* ── Festive Anniversary Pill Badge ─────────────────────────────── */
+.r-v2-widget-anniv__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: var(--r-radius-pill);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #fef08a;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.22), rgba(217, 119, 6, 0.35));
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  box-shadow: 0 2px 10px rgba(245, 158, 11, 0.2);
+  flex-shrink: 0;
+  margin-bottom: 4px;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.r-v2-widget-anniv__sparkle {
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* ── Hero Cover Showcase ────────────────────────────────────────── */
+.r-v2-widget-anniv__cover-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 130px;
+  max-height: 155px;
+  position: relative;
+}
+
+.r-v2-widget-anniv__body .r-v2-widget-anniv__cover {
+  height: auto;
+  max-height: 155px;
+  min-height: 130px;
+  width: auto;
+  max-width: 100%;
+  flex: 1 1 auto;
+  object-fit: contain;
+  --r-cover-radius: var(--r-radius-sm);
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.45));
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Interactive Hover Lift */
+html:not([data-input="pad"]) .r-v2-widget-anniv__body:hover .r-v2-widget-anniv__cover {
+  transform: translateY(-2px) scale(1.02);
+}
+
+html:not([data-input="pad"]) .r-v2-widget-anniv__body:hover .r-v2-widget-anniv__badge {
+  border-color: rgba(251, 191, 36, 0.7);
+  box-shadow: 0 3px 14px rgba(245, 158, 11, 0.35);
+}
+
+/* ── Game Info Section ──────────────────────────────────────────── */
+.r-v2-widget-anniv__info {
+  width: 100%;
+  align-items: center;
+  text-align: center;
+  gap: 4px;
+  flex-shrink: 0;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  margin-top: 4px;
+}
+
 .r-v2-widget-anniv__name {
-  font-size: 12.5px;
-  font-weight: var(--r-font-weight-semibold);
-  line-height: 1.2;
-  color: var(--r-color-fg);
-  /* Clamped at 2 lines, like RandomPick, so the rail's heights stay in step. */
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: center;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
+  color: var(--r-color-fg);
   transition: color var(--r-motion-fast) var(--r-motion-ease-out);
 }
 
-/* Hover is gated to pointer modalities so a parked cursor doesn't compete with
-   the focused element under keyboard / gamepad. */
-html:not([data-input="pad"])
-  .r-v2-widget-anniv__body:hover
-  .r-v2-widget-anniv__name,
+/* Hover / Focus accent color */
+html:not([data-input="pad"]) .r-v2-widget-anniv__body:hover .r-v2-widget-anniv__name,
 .r-v2-widget-anniv__body:focus-visible .r-v2-widget-anniv__name {
-  color: var(--r-color-brand-primary);
+  color: #fbbf24;
 }
 
 .r-v2-widget-anniv__platform {
@@ -329,25 +419,22 @@ html:not([data-input="pad"])
   white-space: nowrap;
 }
 
-.r-v2-widget-anniv__meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  margin-top: auto;
-  font-size: 11px;
-  color: var(--r-color-fg-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.r-v2-widget-anniv__position {
-  margin-left: auto;
-  color: var(--r-color-fg-faint);
-}
-
+/* ── Empty & Error States ───────────────────────────────────────── */
 .r-v2-widget-anniv__empty {
-  font-size: 12px;
-  color: var(--r-color-fg-faint);
-  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 1;
+  text-align: center;
+  color: var(--r-color-fg-muted);
+  font-size: 12.5px;
+  padding: 16px;
+}
+
+.r-v2-widget-anniv__empty-icon {
+  font-size: 28px;
+  opacity: 0.8;
 }
 </style>
