@@ -234,7 +234,9 @@ useIntervalFn(() => {
       <!-- Celebration badge: Years elapsed -->
       <div v-if="yearsAgo" class="r-v2-widget-anniv__badge">
         <span class="r-v2-widget-anniv__sparkle">✨</span>
-        <span>{{ t("home.widget-anniversaries-years", { count: yearsAgo }) }}</span>
+        <span>{{
+          t("home.widget-anniversaries-years", { count: yearsAgo })
+        }}</span>
       </div>
 
       <!-- Main Showcase Cover -->
@@ -322,12 +324,19 @@ useIntervalFn(() => {
   font-weight: 700;
   letter-spacing: 0.02em;
   color: #fef08a;
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.22), rgba(217, 119, 6, 0.35));
+  background: linear-gradient(
+    135deg,
+    rgba(245, 158, 11, 0.22),
+    rgba(217, 119, 6, 0.35)
+  );
   border: 1px solid rgba(251, 191, 36, 0.45);
   box-shadow: 0 2px 10px rgba(245, 158, 11, 0.2);
   flex-shrink: 0;
   margin-bottom: 4px;
-  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .r-v2-widget-anniv__sparkle {
@@ -361,11 +370,15 @@ useIntervalFn(() => {
 }
 
 /* Interactive Hover Lift */
-html:not([data-input="pad"]) .r-v2-widget-anniv__body:hover .r-v2-widget-anniv__cover {
+html:not([data-input="pad"])
+  .r-v2-widget-anniv__body:hover
+  .r-v2-widget-anniv__cover {
   transform: translateY(-2px) scale(1.02);
 }
 
-html:not([data-input="pad"]) .r-v2-widget-anniv__body:hover .r-v2-widget-anniv__badge {
+html:not([data-input="pad"])
+  .r-v2-widget-anniv__body:hover
+  .r-v2-widget-anniv__badge {
   border-color: rgba(251, 191, 36, 0.7);
   box-shadow: 0 3px 14px rgba(245, 158, 11, 0.35);
 }
@@ -399,7 +412,9 @@ html:not([data-input="pad"]) .r-v2-widget-anniv__body:hover .r-v2-widget-anniv__
 }
 
 /* Hover / Focus accent color */
-html:not([data-input="pad"]) .r-v2-widget-anniv__body:hover .r-v2-widget-anniv__name,
+html:not([data-input="pad"])
+  .r-v2-widget-anniv__body:hover
+  .r-v2-widget-anniv__name,
 .r-v2-widget-anniv__body:focus-visible .r-v2-widget-anniv__name {
   color: #fbbf24;
 }
