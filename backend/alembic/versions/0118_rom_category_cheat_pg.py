@@ -17,7 +17,7 @@ from utils.database import is_postgresql
 
 # revision identifiers, used by Alembic.
 revision = "0118_rom_category_cheat_pg"
-down_revision = "0117_rom_files_mtime_double"
+down_revision = "0117_cloud_platform_generations"
 branch_labels = None
 depends_on = None
 

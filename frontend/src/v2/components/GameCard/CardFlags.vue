@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// CardFlags — region / language emoji chips over the cover's bottom-left
+// CardFlags: region / language emoji chips over the cover's bottom-left
 // corner, the v2 counterpart of v1's cover flags. Visibility is driven by
 // the showRegions / showLanguages UI settings; each chip caps at three
 // emoji and carries the full list in its hover title. Purely informational:
@@ -72,5 +72,22 @@ const languages = computed(() =>
   font-size: 17px;
   line-height: 1.2;
   backdrop-filter: blur(6px);
+}
+
+/* Emoji ink spans baseline to cap height, so trimming to that box centers it;
+   the larger padding makes up the trimmed height. */
+@supports (text-box: trim-both cap alphabetic) {
+  .card-flags__chip {
+    padding-block: 4.5px;
+  }
+
+  .card-flags__chip > span {
+    text-box: trim-both cap alphabetic;
+  }
+
+  /* Twemoji flags center 0.375em up, Segoe UI's trimmed box at 0.35em. */
+  html[data-flag-polyfill] .card-flags__chip > span {
+    translate: 0 0.025em;
+  }
 }
 </style>
